@@ -37,6 +37,42 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "output" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _run_pipeline_task_retry(task_id: str) -> None:
+    """断点重试：仅用历史中的题目文本重新跑流水线，从检查点继续（不传图、不重新 OCR）。"""
+    rec = history_get(task_id)
+    if not rec:
+        set_failed(task_id, "任务记录不存在")
+        return
+    problem_text = (rec.problem_text or "").strip()
+    if not problem_text:
+        set_failed(task_id, "无题目文本，无法断点重试")
+        return
+    output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
+    logger.info("[retry] 断点重试 task_id=%s", task_id)
+    try:
+        set_running(task_id)
+
+        def on_step_start(step_index: int, step_name: str) -> None:
+            set_progress(task_id, step_name)
+
+        video_path = run_pipeline(
+            problem_text,
+            output_dir,
+            image_base64=None,
+            image_mime_type="image/jpeg",
+            on_step_start=on_step_start,
+            force_restart=False,
+        )
+        result_path = RESULTS_DIR / f"{task_id}.mp4"
+        import shutil
+        shutil.copy(str(video_path), str(result_path))
+        set_success(task_id, f"/results/{task_id}.mp4")
+        logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, result_path)
+    except Exception as e:
+        logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
+        set_failed(task_id, str(e))
+
+
 def _run_pipeline_task(
     task_id: str,
     problem_text: str | None,
@@ -163,6 +199,24 @@ async def get_task_status(task_id: str):
         error=task.error,
         current_step=task.current_step,
     )
+
+
+@router.post("/tasks/{task_id}/retry", response_model=GenerateVideoResponse)
+async def retry_task(background_tasks: BackgroundTasks, task_id: str):
+    """失败任务的断点重试：从上次中断的步骤继续，不重新执行已完成步骤。"""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "failed":
+        raise HTTPException(
+            status_code=400,
+            detail="仅支持对失败任务进行重试，当前状态: " + task.status,
+        )
+    rec = history_get(task_id)
+    if not rec or not (rec.problem_text or "").strip():
+        raise HTTPException(status_code=400, detail="该记录无题目文本，无法断点重试")
+    background_tasks.add_task(_run_pipeline_task_retry, task_id)
+    return GenerateVideoResponse(task_id=task_id, status="pending")
 
 
 @router.get("/history", response_model=list[HistoryItem])

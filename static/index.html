@@ -225,6 +225,9 @@
 
   <div id="progress-card" aria-live="polite">
     <div id="status"></div>
+    <div id="status-actions" style="display: none; margin-top: 0.5rem;">
+      <button type="button" id="btn-retry-current" class="btn btn-primary">断点重试</button>
+    </div>
     <div class="progress-bar-wrap">
       <div class="progress-bar-fill" id="progress-bar"></div>
     </div>
@@ -266,7 +269,10 @@
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '';
     });
 
-    function showStatus(text, type) {
+    const statusActionsEl = document.getElementById('status-actions');
+    const btnRetryCurrentEl = document.getElementById('btn-retry-current');
+
+    function showStatus(text, type, retryTaskId) {
       progressCardEl.classList.add('visible');
       statusEl.textContent = text;
       statusEl.className = type || '';
@@ -275,6 +281,12 @@
         progressCardEl.classList.add('result-only');
       } else {
         progressCardEl.classList.remove('result-only');
+      }
+      if (type === 'failed' && retryTaskId) {
+        statusActionsEl.style.display = 'block';
+        btnRetryCurrentEl.setAttribute('data-task-id', retryTaskId);
+      } else {
+        statusActionsEl.style.display = 'none';
       }
     }
 
@@ -342,6 +354,9 @@
               html += '<button type="button" class="btn btn-ghost btn-play" data-task-id="' + item.task_id + '">播放</button>';
               html += '<a class="btn btn-ghost" href="' + (item.video_path || ('/results/' + item.task_id + '.mp4')) + '" download="math_' + item.task_id + '.mp4">下载</a>';
             }
+            if (item.status === 'failed') {
+              html += '<button type="button" class="btn btn-primary btn-retry" data-task-id="' + item.task_id + '">断点重试</button>';
+            }
             html += '<button type="button" class="btn btn-ghost btn-regenerate" data-task-id="' + item.task_id + '">重新生成</button>';
             html += '<button type="button" class="btn btn-danger btn-delete" data-task-id="' + item.task_id + '">删除</button>';
             html += '</div>';
@@ -356,6 +371,23 @@
               downloadEl.href = url;
               downloadEl.download = 'math_explainer.mp4';
               playerEl.style.display = 'block';
+            });
+          });
+          historyListEl.querySelectorAll('.btn-retry').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var taskId = btn.getAttribute('data-task-id');
+              btn.disabled = true;
+              fetch('/api/tasks/' + encodeURIComponent(taskId) + '/retry', { method: 'POST' })
+                .then(function(r) { return r.json().then(function(j) { if (!r.ok) throw new Error(j.detail || r.statusText); return j; }); })
+                .then(function() {
+                  showStatus('已提交断点重试…', 'running');
+                  submitBtn.disabled = true;
+                  pollTask(taskId, function() { loadHistory(); });
+                })
+                .catch(function(err) {
+                  showStatus('重试请求失败：' + (err.message || err), 'failed');
+                })
+                .finally(function() { btn.disabled = false; });
             });
           });
           historyListEl.querySelectorAll('.btn-regenerate').forEach(function(btn) {
@@ -426,7 +458,7 @@
               return;
             }
             if (data.status === 'failed') {
-              showStatus('生成失败：' + (data.error || '未知错误'), 'failed');
+              showStatus('生成失败：' + (data.error || '未知错误'), 'failed', taskId);
               hideProgress();
               submitBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
@@ -475,6 +507,24 @@
           showStatus('提交失败：' + (err.message || err), 'failed');
           submitBtn.disabled = false;
         });
+    });
+
+    btnRetryCurrentEl.addEventListener('click', function() {
+      var taskId = btnRetryCurrentEl.getAttribute('data-task-id');
+      if (!taskId) return;
+      btnRetryCurrentEl.disabled = true;
+      fetch('/api/tasks/' + encodeURIComponent(taskId) + '/retry', { method: 'POST' })
+        .then(function(r) { return r.json().then(function(j) { if (!r.ok) throw new Error(j.detail || r.statusText); return j; }); })
+        .then(function() {
+          showStatus('已提交断点重试…', 'running');
+          statusActionsEl.style.display = 'none';
+          submitBtn.disabled = true;
+          pollTask(taskId, function() { loadHistory(); });
+        })
+        .catch(function(err) {
+          showStatus('重试请求失败：' + (err.message || err), 'failed');
+        })
+        .finally(function() { btnRetryCurrentEl.disabled = false; });
     });
 
     loadHistory();
