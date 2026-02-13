@@ -1,4 +1,4 @@
-"""FastAPI 路由：POST /generate_video，GET /tasks/{task_id}，结果视频静态或下载。"""
+"""FastAPI 路由：POST /generate_video，GET /tasks/{task_id}，结果 HTML 动画静态或下载。"""
 import logging
 from pathlib import Path
 
@@ -55,7 +55,7 @@ def _run_pipeline_task_retry(task_id: str) -> None:
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
-        video_path = run_pipeline(
+        result_path = run_pipeline(
             problem_text,
             output_dir,
             image_base64=None,
@@ -63,11 +63,11 @@ def _run_pipeline_task_retry(task_id: str) -> None:
             on_step_start=on_step_start,
             force_restart=False,
         )
-        result_path = RESULTS_DIR / f"{task_id}.mp4"
+        dest = RESULTS_DIR / f"{task_id}.html"
         import shutil
-        shutil.copy(str(video_path), str(result_path))
-        set_success(task_id, f"/results/{task_id}.mp4")
-        logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, result_path)
+        shutil.copy(str(result_path), str(dest))
+        set_success(task_id, f"/results/{task_id}.html")
+        logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
     except Exception as e:
         logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
         set_failed(task_id, str(e))
@@ -81,7 +81,7 @@ def _run_pipeline_task(
 ) -> None:
     """后台执行：若有图片则先识别题目 → 公式验证 → 带原图跑流水线。"""
     output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
-    logger.info("[generate_video] 后台任务开始 task_id=%s 有图片=%s", task_id, bool(image_bytes))
+    logger.info("[generate] 后台任务开始 task_id=%s 有图片=%s", task_id, bool(image_bytes))
 
     # 原图 base64（贯穿流水线，让后续 LLM 调用都能看到原图）
     img_b64: str | None = None
@@ -94,32 +94,32 @@ def _run_pipeline_task(
             img_b64 = image_to_base64(image_bytes)
 
             set_progress(task_id, "识别题目图片")
-            logger.info("[generate_video] task_id=%s 正在识别题目图片…", task_id)
+            logger.info("[generate] task_id=%s 正在识别题目图片…", task_id)
             try:
                 problem_text = extract_problem_text_from_image(image_bytes, mime_type=image_mime_type)
-                logger.info("[generate_video] task_id=%s 图片识别完成 题目长度=%d", task_id, len(problem_text or ""))
+                logger.info("[generate] task_id=%s 图片识别完成 题目长度=%d", task_id, len(problem_text or ""))
             except Exception as e:
-                logger.exception("[generate_video] task_id=%s 图片识别失败: %s", task_id, e)
+                logger.exception("[generate] task_id=%s 图片识别失败: %s", task_id, e)
                 set_failed(task_id, f"图片识别失败: {e}")
                 return
 
             if not (problem_text or "").strip():
-                logger.warning("[generate_video] task_id=%s 图片未识别出文字", task_id)
+                logger.warning("[generate] task_id=%s 图片未识别出文字", task_id)
                 set_failed(task_id, "未能从图片中识别出题目文字")
                 return
 
             # ---------- 公式交叉验证（P2）：用原图校正 OCR 文本 ----------
             set_progress(task_id, "公式交叉验证")
-            logger.info("[generate_video] task_id=%s 开始公式交叉验证", task_id)
+            logger.info("[generate] task_id=%s 开始公式交叉验证", task_id)
             try:
                 problem_text = verify_and_fix_formulas(
                     problem_text,
                     image_base64=img_b64,
                     image_mime_type=image_mime_type,
                 )
-                logger.info("[generate_video] task_id=%s 公式验证完成 验证后长度=%d", task_id, len(problem_text or ""))
+                logger.info("[generate] task_id=%s 公式验证完成 验证后长度=%d", task_id, len(problem_text or ""))
             except Exception as e:
-                logger.warning("[generate_video] task_id=%s 公式验证失败（不阻塞）: %s", task_id, e)
+                logger.warning("[generate] task_id=%s 公式验证失败（不阻塞）: %s", task_id, e)
                 # 验证失败不阻塞流水线，继续使用 OCR 原始文本
 
         if not (problem_text or "").strip():
@@ -127,26 +127,26 @@ def _run_pipeline_task(
             return
         # 持久化题目文本，便于历史列表展示与重新生成
         update_task_problem(task_id, problem_text.strip())
-        logger.info("[generate_video] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
+        logger.info("[generate] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
 
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
         # ---------- 执行流水线（传入原图 base64） ----------
-        video_path = run_pipeline(
+        result_path = run_pipeline(
             problem_text.strip(),
             output_dir,
             image_base64=img_b64,
             image_mime_type=image_mime_type,
             on_step_start=on_step_start,
         )
-        result_path = RESULTS_DIR / f"{task_id}.mp4"
+        dest = RESULTS_DIR / f"{task_id}.html"
         import shutil
-        shutil.copy(str(video_path), str(result_path))
-        set_success(task_id, f"/results/{task_id}.mp4")
-        logger.info("[generate_video] task_id=%s 生成成功 path=%s", task_id, result_path)
+        shutil.copy(str(result_path), str(dest))
+        set_success(task_id, f"/results/{task_id}.html")
+        logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
     except Exception as e:
-        logger.exception("[generate_video] task_id=%s 生成失败: %s", task_id, e)
+        logger.exception("[generate] task_id=%s 生成失败: %s", task_id, e)
         set_failed(task_id, str(e))
 
 
@@ -182,7 +182,7 @@ async def generate_video(
 
     problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
     task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
-    logger.info("[generate_video] 收到请求 task_id=%s 有文字=%s 有图片=%s", task_id, bool(problem_text), bool(image_bytes))
+    logger.info("[generate] 收到请求 task_id=%s 有文字=%s 有图片=%s", task_id, bool(problem_text), bool(image_bytes))
     background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type)
     return GenerateVideoResponse(task_id=task_id, status="pending")
 
@@ -195,7 +195,7 @@ async def get_task_status(task_id: str):
     return TaskStatusResponse(
         task_id=task.task_id,
         status=task.status,
-        video_url=task.video_path if task.status == "success" else None,
+        result_url=task.result_path if task.status == "success" else None,
         error=task.error,
         current_step=task.current_step,
     )
@@ -228,7 +228,7 @@ async def get_history(limit: int = 50, offset: int = 0):
             task_id=r.task_id,
             problem_preview=r.problem_preview,
             status=r.status,
-            video_path=r.video_path,
+            result_path=r.video_path,
             error=r.error,
             created_at=r.created_at,
         )
@@ -238,22 +238,24 @@ async def get_history(limit: int = 50, offset: int = 0):
 
 @router.delete("/history/{task_id}")
 async def delete_history(task_id: str):
-    """删除一条历史记录；若存在结果视频文件则一并删除。"""
+    """删除一条历史记录；若存在结果文件则一并删除。"""
     if not history_delete(task_id):
         raise HTTPException(status_code=404, detail="记录不存在")
     delete_task(task_id)
-    result_file = RESULTS_DIR / f"{task_id}.mp4"
-    if result_file.exists():
-        try:
-            result_file.unlink()
-        except OSError:
-            pass
+    # 清理可能存在的旧格式 mp4 和新格式 html 文件
+    for ext in (".html", ".mp4"):
+        result_file = RESULTS_DIR / f"{task_id}{ext}"
+        if result_file.exists():
+            try:
+                result_file.unlink()
+            except OSError:
+                pass
     return {"ok": True}
 
 
 @router.post("/regenerate", response_model=RegenerateResponse)
 async def regenerate(background_tasks: BackgroundTasks, body: RegenerateRequest):
-    """根据历史任务 ID 使用其题目文本重新生成视频（仅文本，无原图）。"""
+    """根据历史任务 ID 使用其题目文本重新生成（仅文本，无原图）。"""
     rec = history_get(body.task_id)
     if not rec:
         raise HTTPException(status_code=404, detail="任务不存在")

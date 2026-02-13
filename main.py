@@ -1,4 +1,4 @@
-"""FastAPI 应用入口：挂载 API、结果视频静态目录、Web 前端静态目录。"""
+"""FastAPI 应用入口：挂载 API、结果静态目录、Web 前端静态目录。"""
 import logging
 from pathlib import Path
 
@@ -17,7 +17,7 @@ logging.basicConfig(
 # 降低 uvicorn 访问日志噪音，业务日志仍为 INFO
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-app = FastAPI(title="数学讲解视频流水线", version="0.1.0")
+app = FastAPI(title="数学讲解动画流水线", version="0.2.0")
 
 
 @app.on_event("startup")
@@ -27,7 +27,7 @@ def startup():
 
 app.include_router(router, prefix="/api", tags=["explainer"])
 
-# 结果视频通过 /results/{task_id}.mp4 访问
+# 结果 HTML 动画通过 /results/{task_id}.html 访问
 app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
 
 # Web 界面：静态页面目录

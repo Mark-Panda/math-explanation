@@ -1,4 +1,4 @@
-"""内存任务状态存储：task_id -> status, video_path, error, current_step。与 history_store 联动持久化。"""
+"""内存任务状态存储：task_id -> status, result_path, error, current_step。与 history_store 联动持久化。"""
 from dataclasses import dataclass
 from typing import Optional
 import uuid
@@ -14,7 +14,7 @@ from api.history_store import (
 class TaskState:
     task_id: str
     status: str  # pending | running | success | failed
-    video_path: Optional[str] = None
+    result_path: Optional[str] = None
     error: Optional[str] = None
     current_step: Optional[str] = None  # 当前执行步骤，用于前端进度展示
 
@@ -41,20 +41,20 @@ def set_progress(task_id: str, current_step: str) -> None:
         _tasks[task_id].current_step = current_step
 
 
-def set_success(task_id: str, video_path: str) -> None:
+def set_success(task_id: str, result_path: str) -> None:
     if task_id in _tasks:
         _tasks[task_id].status = "success"
-        _tasks[task_id].video_path = video_path
+        _tasks[task_id].result_path = result_path
         _tasks[task_id].error = None
         _tasks[task_id].current_step = None
-    history_update_status(task_id, "success", video_path=video_path)
+    history_update_status(task_id, "success", video_path=result_path)
 
 
 def set_failed(task_id: str, error: str) -> None:
     if task_id in _tasks:
         _tasks[task_id].status = "failed"
         _tasks[task_id].error = error
-        _tasks[task_id].video_path = None
+        _tasks[task_id].result_path = None
         _tasks[task_id].current_step = None
     history_update_status(task_id, "failed", error=error)
 
@@ -74,7 +74,7 @@ def get_task(task_id: str) -> Optional[TaskState]:
     return TaskState(
         task_id=rec.task_id,
         status=rec.status,
-        video_path=rec.video_path,
+        result_path=rec.video_path,
         error=rec.error,
         current_step=None,
     )

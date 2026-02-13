@@ -14,7 +14,7 @@ class GenerateVideoResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     task_id: str
     status: str = Field(..., description="pending | running | success | failed")
-    video_url: str | None = Field(None, description="成功时的结果视频 URL（相对或绝对）")
+    result_url: str | None = Field(None, description="成功时的结果 HTML 动画 URL（相对或绝对）")
     error: str | None = Field(None, description="失败时的错误信息")
     current_step: str | None = Field(None, description="当前执行步骤，用于前端进度显示")
 
@@ -23,7 +23,7 @@ class HistoryItem(BaseModel):
     task_id: str
     problem_preview: str = ""
     status: str
-    video_path: str | None = None
+    result_path: str | None = None
     error: str | None = None
     created_at: str = ""
 

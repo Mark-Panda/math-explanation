@@ -2,21 +2,22 @@
 import pytest
 
 from problem_analysis.schemas import StepItem
-from script_generation.generator import generate_manim_code_and_prompts
+from script_generation.generator import generate_animation_html_and_prompts
 
 
-def test_generate_manim_code_and_prompts_empty_steps_raises():
+def test_generate_animation_html_and_prompts_empty_steps_raises():
     with pytest.raises(ValueError, match="不能为空"):
-        generate_manim_code_and_prompts([])
+        generate_animation_html_and_prompts([])
 
 
-def test_generate_manim_code_and_prompts_invalid_step_raises():
+def test_generate_animation_html_and_prompts_invalid_step_raises():
     bad = [StepItem(step_id=1, description="", math_formula="", visual_focus="", voiceover_text="")]
     with pytest.raises(ValueError, match="description 或 voiceover_text"):
-        generate_manim_code_and_prompts(bad)
+        generate_animation_html_and_prompts(bad)
 
 
-def test_generate_manim_code_and_prompts_valid():
+def test_generate_animation_html_and_prompts_valid():
+    """完整流程测试（需要 LLM API Key）。"""
     pytest.importorskip("langchain_openai")
     import os
     if not os.environ.get("OPENAI_API_KEY"):
@@ -30,8 +31,8 @@ def test_generate_manim_code_and_prompts_valid():
             voiceover_text="我们设 x 平方等于 1。",
         ),
     ]
-    out = generate_manim_code_and_prompts(steps)
-    assert "SolutionScene" in out.manim_code
-    assert "self.wait()" in out.manim_code
+    out = generate_animation_html_and_prompts(steps)
+    assert "stepAnimations" in out.animation_html
+    assert "STEP_PLACEHOLDER" in out.animation_html
     assert len(out.image_prompts) >= 1
-    assert isinstance(out.manim_code, str) and len(out.manim_code) > 0
+    assert isinstance(out.animation_html, str) and len(out.animation_html) > 0

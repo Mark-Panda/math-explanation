@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>数学讲解视频生成</title>
+  <title>数学讲解动画生成</title>
   <style>
     * { box-sizing: border-box; }
     :root {
@@ -161,13 +161,25 @@
     #player {
       margin-top: 1rem;
       display: none;
-      padding: 1rem;
       background: var(--surface);
       border-radius: var(--radius);
       border: 1px solid var(--border);
+      overflow: hidden;
     }
-    #player video { width: 100%; max-height: 360px; border-radius: 4px; }
-    #player a { display: inline-block; margin-top: 0.5rem; color: var(--accent); }
+    #player iframe {
+      width: 100%;
+      height: 700px;
+      border: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    #player .player-actions {
+      padding: 0.75rem 1rem;
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    #player a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+    #player a:hover { text-decoration: underline; }
     .section-title { font-size: 1rem; font-weight: 600; margin: 2rem 0 0.75rem; }
     #history-list { margin-top: 0.5rem; }
     .history-item {
@@ -209,8 +221,8 @@
   </style>
 </head>
 <body>
-  <h1>数学讲解视频生成</h1>
-  <p class="muted">输入数学题目或上传题目图片，生成后可在此查看历史、删除或重新生成。</p>
+  <h1>数学讲解动画生成</h1>
+  <p class="muted">输入数学题目或上传题目图片，生成交互式网页动画讲解。可在此查看历史、删除或重新生成。</p>
 
   <div>
     <label for="problem">题目（文字）</label>
@@ -220,7 +232,7 @@
       <input type="file" id="image" accept="image/jpeg,image/png,image/gif,image/webp" />
       <span id="imageName" class="muted" style="margin-left: 0.5rem;"></span>
     </div>
-    <button id="submit" class="btn btn-primary">生成视频</button>
+    <button id="submit" class="btn btn-primary">生成动画</button>
   </div>
 
   <div id="progress-card" aria-live="polite">
@@ -237,8 +249,12 @@
     </div>
   </div>
   <div id="player">
-    <video controls></video>
-    <a id="download" href="" download="">下载视频</a>
+    <iframe id="result-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+    <div class="player-actions">
+      <a id="open-new-tab" href="" target="_blank">在新标签页打开</a>
+      <span class="muted">|</span>
+      <a id="download" href="" download="">下载 HTML</a>
+    </div>
   </div>
 
   <h2 class="section-title">生成记录</h2>
@@ -247,30 +263,31 @@
   <div id="history-list"></div>
 
   <script>
-    const problemEl = document.getElementById('problem');
-    const imageEl = document.getElementById('image');
-    const imageNameEl = document.getElementById('imageName');
-    const submitBtn = document.getElementById('submit');
-    const progressCardEl = document.getElementById('progress-card');
-    const statusEl = document.getElementById('status');
-    const progressBarEl = document.getElementById('progress-bar');
-    const progressMetaEl = document.getElementById('progress-meta');
-    const progressStepsEl = document.getElementById('progress-steps');
-    const playerEl = document.getElementById('player');
-    const videoEl = playerEl.querySelector('video');
-    const downloadEl = document.getElementById('download');
-    const historyListEl = document.getElementById('history-list');
-    const historyLoadingEl = document.getElementById('history-loading');
-    const historyEmptyEl = document.getElementById('history-empty');
+    var problemEl = document.getElementById('problem');
+    var imageEl = document.getElementById('image');
+    var imageNameEl = document.getElementById('imageName');
+    var submitBtn = document.getElementById('submit');
+    var progressCardEl = document.getElementById('progress-card');
+    var statusEl = document.getElementById('status');
+    var progressBarEl = document.getElementById('progress-bar');
+    var progressMetaEl = document.getElementById('progress-meta');
+    var progressStepsEl = document.getElementById('progress-steps');
+    var playerEl = document.getElementById('player');
+    var resultFrame = document.getElementById('result-frame');
+    var openNewTabEl = document.getElementById('open-new-tab');
+    var downloadEl = document.getElementById('download');
+    var historyListEl = document.getElementById('history-list');
+    var historyLoadingEl = document.getElementById('history-loading');
+    var historyEmptyEl = document.getElementById('history-empty');
 
-    var ALL_STEPS = ['识别题目图片', '公式交叉验证', '题目分析', '多模态脚本生成', 'TTS 与时长收集', '时长注入与 Manim 渲染', '音频拼接', '视频合成'];
+    var ALL_STEPS = ['识别题目图片', '公式交叉验证', '题目分析', '网页动画脚本生成', 'TTS 与时长收集', '时长注入与 HTML 渲染'];
 
     imageEl.addEventListener('change', function() {
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '';
     });
 
-    const statusActionsEl = document.getElementById('status-actions');
-    const btnRetryCurrentEl = document.getElementById('btn-retry-current');
+    var statusActionsEl = document.getElementById('status-actions');
+    var btnRetryCurrentEl = document.getElementById('btn-retry-current');
 
     function showStatus(text, type, retryTaskId) {
       progressCardEl.classList.add('visible');
@@ -319,6 +336,14 @@
       progressCardEl.classList.add('result-only');
     }
 
+    function showResult(url) {
+      resultFrame.src = url;
+      openNewTabEl.href = url;
+      downloadEl.href = url;
+      downloadEl.download = 'math_animation.html';
+      playerEl.style.display = 'block';
+    }
+
     function formatDate(iso) {
       if (!iso) return '—';
       try {
@@ -350,9 +375,10 @@
             var html = '<div class="preview" title="' + (item.problem_preview || '').replace(/"/g, '&quot;') + '">' + (item.problem_preview || '—') + '</div>';
             html += '<div class="meta"><span class="badge ' + statusClass + '">' + statusText + '</span><span>' + formatDate(item.created_at) + '</span></div>';
             html += '<div class="actions">';
-            if (item.status === 'success' && item.video_path) {
-              html += '<button type="button" class="btn btn-ghost btn-play" data-task-id="' + item.task_id + '">播放</button>';
-              html += '<a class="btn btn-ghost" href="' + (item.video_path || ('/results/' + item.task_id + '.mp4')) + '" download="math_' + item.task_id + '.mp4">下载</a>';
+            if (item.status === 'success' && item.result_path) {
+              html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">查看</button>';
+              html += '<a class="btn btn-ghost" href="' + item.result_path + '" target="_blank">新窗口打开</a>';
+              html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + '.html">下载</a>';
             }
             if (item.status === 'failed') {
               html += '<button type="button" class="btn btn-primary btn-retry" data-task-id="' + item.task_id + '">断点重试</button>';
@@ -365,12 +391,8 @@
           });
           historyListEl.querySelectorAll('.btn-play').forEach(function(btn) {
             btn.addEventListener('click', function() {
-              var taskId = btn.getAttribute('data-task-id');
-              var url = '/results/' + taskId + '.mp4';
-              videoEl.src = url;
-              downloadEl.href = url;
-              downloadEl.download = 'math_explainer.mp4';
-              playerEl.style.display = 'block';
+              var url = btn.getAttribute('data-url');
+              showResult(url);
             });
           });
           historyListEl.querySelectorAll('.btn-retry').forEach(function(btn) {
@@ -448,11 +470,8 @@
             if (data.status === 'success') {
               showStatus('生成成功', 'success');
               hideProgress();
-              var videoUrl = data.video_url || ('/results/' + taskId + '.mp4');
-              videoEl.src = videoUrl;
-              downloadEl.href = videoUrl;
-              downloadEl.download = 'math_explainer.mp4';
-              playerEl.style.display = 'block';
+              var resultUrl = data.result_url || ('/results/' + taskId + '.html');
+              showResult(resultUrl);
               submitBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
               return;

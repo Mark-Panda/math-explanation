@@ -21,7 +21,7 @@ def _checkpoint_dir(work_dir: Path) -> Path:
 
 
 def get_last_completed_step(work_dir: Path) -> int:
-    """返回已完成的最后一步索引 (0..5)，无检查点或损坏时返回 -1。"""
+    """返回已完成的最后一步索引 (0..3)，无检查点或损坏时返回 -1。"""
     cp_dir = _checkpoint_dir(work_dir)
     manifest_path = cp_dir / MANIFEST_FILE
     if not manifest_path.is_file():
@@ -29,7 +29,7 @@ def get_last_completed_step(work_dir: Path) -> int:
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         step = int(data.get("last_completed_step", -1))
-        return step if -1 <= step <= 5 else -1
+        return step if -1 <= step <= 3 else -1
     except (json.JSONDecodeError, OSError, ValueError) as e:
         logger.warning("[checkpoint] 读取 manifest 失败: %s", e)
         return -1
@@ -93,7 +93,7 @@ def save_step_checkpoint(
 ) -> None:
     """
     保存指定步骤的检查点并更新 manifest。
-    step_index: 0=steps, 1=script, 2=durations；3/4/5 仅更新 manifest（无额外 JSON）。
+    step_index: 0=steps, 1=script, 2=durations；3 仅更新 manifest（无额外 JSON）。
     """
     work_dir = Path(work_dir)
     cp_dir = _checkpoint_dir(work_dir)

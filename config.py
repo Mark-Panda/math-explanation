@@ -1,4 +1,4 @@
-"""从环境变量或 .env 加载配置（LLM、TTS、Manim/FFmpeg、自愈重试等）。"""
+"""从环境变量或 .env 加载配置（LLM、TTS、HTML 渲染自愈等）。"""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 120.0
     """单次请求超时秒数（题目分析、代码自愈等）。"""
     llm_script_timeout: float = 300.0
-    """脚本生成请求超时秒数（阶段2 返回整段 Manim 代码，耗时长；若前置网关 504 需调大网关超时）。"""
+    """脚本生成请求超时秒数（阶段2 返回整段动画代码，耗时长；若前置网关 504 需调大网关超时）。"""
 
     # ---------- 视觉模型（Vision LLM）配置 ----------
     # 未配置时自动回退到上方文本模型的对应配置
@@ -43,12 +43,8 @@ class Settings(BaseSettings):
     # TTS（edge-tts 用 voice 名）
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
 
-    # Manim / FFmpeg 路径（空则用系统 PATH）
-    manim_command: str = "manim"
-    ffmpeg_command: str = "ffmpeg"
-
-    # 自愈：Manim 代码失败时 LLM 修复的最大重试次数
-    manim_self_heal_max_attempts: int = 5
+    # 自愈：HTML 动画代码校验失败时 LLM 修复的最大重试次数
+    html_self_heal_max_attempts: int = 3
 
     # 默认 wait 时长（秒），用于时长不足时的兜底
     default_wait_seconds: float = 2.0
