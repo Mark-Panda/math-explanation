@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from api.history_store import init_db as init_history_db
 from api.routes import router, RESULTS_DIR
 
 # 配置日志：便于查看 /api/generate_video 及流水线执行进度
@@ -17,6 +18,13 @@ logging.basicConfig(
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 app = FastAPI(title="数学讲解视频流水线", version="0.1.0")
+
+
+@app.on_event("startup")
+def startup():
+    init_history_db()
+
+
 app.include_router(router, prefix="/api", tags=["explainer"])
 
 # 结果视频通过 /results/{task_id}.mp4 访问

@@ -38,6 +38,7 @@ htmlcov/
 # 项目生成产物
 output/
 media/
+data/
 
 # Manim 临时与缓存（若在项目内生成）
 *.log

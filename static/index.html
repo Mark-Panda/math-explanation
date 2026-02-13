@@ -6,91 +6,407 @@
   <title>数学讲解视频生成</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 1.5rem; }
-    h1 { margin-top: 0; }
-    textarea { width: 100%; min-height: 120px; padding: 0.5rem; }
-    button { padding: 0.5rem 1rem; margin-top: 0.5rem; cursor: pointer; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    #status { margin-top: 1rem; padding: 0.5rem; border-radius: 4px; }
-    #status.running { background: #e3f2fd; }
-    #status.success { background: #e8f5e9; }
-    #status.failed { background: #ffebee; }
-    #progress { margin-top: 0.5rem; font-size: 0.9rem; color: #1565c0; }
-    #progress ul { margin: 0.25rem 0 0 1.2rem; padding: 0; }
-    #progress li { margin: 0.15rem 0; }
-    #progress li.current { font-weight: 600; }
-    #player { margin-top: 1rem; display: none; }
-    #player video { width: 100%; max-height: 400px; }
-    #player a { display: inline-block; margin-top: 0.5rem; }
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --radius: 8px;
+    }
+    body {
+      font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      line-height: 1.5;
+    }
+    h1 { margin-top: 0; font-size: 1.5rem; font-weight: 600; }
+    .muted { color: var(--text-muted); font-size: 0.9rem; }
+    label { display: block; margin-bottom: 0.25rem; font-size: 0.9rem; color: var(--text-muted); }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.95rem;
+      resize: vertical;
+    }
+    textarea::placeholder { color: var(--text-muted); }
+    input[type="file"] {
+      margin-top: 0.25rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: opacity 0.15s;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      margin-top: 0.75rem;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+    .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: rgba(248,81,73,0.15); }
+    #progress-card {
+      margin-top: 1rem;
+      padding: 0;
+      border-radius: var(--radius);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      display: none;
+    }
+    #progress-card.visible { display: block; }
+    #progress-card.result-only .progress-bar-wrap,
+    #progress-card.result-only .progress-meta,
+    #progress-card.result-only .progress-stepper { display: none !important; }
+    #status {
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    #status.running { background: rgba(88,166,255,0.12); color: var(--accent); }
+    #status.success { background: rgba(63,185,80,0.15); color: var(--success); }
+    #status.failed { background: rgba(248,81,73,0.15); color: var(--danger); }
+    .progress-bar-wrap {
+      height: 4px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #79b8ff);
+      border-radius: 0 2px 2px 0;
+      transition: width 0.35s ease-out;
+      width: 0%;
+    }
+    .progress-bar-fill.indeterminate {
+      width: 35%;
+      animation: progress-indeterminate 1.2s ease-in-out infinite;
+    }
+    @keyframes progress-indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+    .progress-meta {
+      padding: 0.5rem 1rem 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .progress-stepper {
+      padding: 0.5rem 1rem 1rem;
+      font-size: 0.85rem;
+    }
+    .progress-stepper ul { list-style: none; margin: 0; padding: 0; }
+    .progress-stepper li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+      color: var(--text-muted);
+    }
+    .progress-stepper li .step-icon {
+      flex-shrink: 0;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+    }
+    .progress-stepper li.done .step-icon {
+      background: rgba(63,185,80,0.25);
+      color: var(--success);
+    }
+    .progress-stepper li.current .step-icon {
+      background: rgba(88,166,255,0.3);
+      color: var(--accent);
+      animation: step-pulse 1.2s ease-in-out infinite;
+    }
+    .progress-stepper li.pending .step-icon {
+      background: var(--border);
+      color: var(--text-muted);
+      opacity: 0.7;
+    }
+    .progress-stepper li.done { color: var(--text-muted); }
+    .progress-stepper li.current { color: var(--accent); font-weight: 500; }
+    @keyframes step-pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(88,166,255,0.4); }
+      50% { opacity: 0.9; box-shadow: 0 0 0 4px rgba(88,166,255,0.15); }
+    }
+    #player {
+      margin-top: 1rem;
+      display: none;
+      padding: 1rem;
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    #player video { width: 100%; max-height: 360px; border-radius: 4px; }
+    #player a { display: inline-block; margin-top: 0.5rem; color: var(--accent); }
+    .section-title { font-size: 1rem; font-weight: 600; margin: 2rem 0 0.75rem; }
+    #history-list { margin-top: 0.5rem; }
+    .history-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .history-item .preview {
+      color: var(--text);
+      margin-bottom: 0.35rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-item .meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+    .history-item .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+    }
+    .history-item .badge.pending { background: rgba(210,153,34,0.2); color: var(--warning); }
+    .history-item .badge.running { background: rgba(88,166,255,0.2); color: var(--accent); }
+    .history-item .badge.success { background: rgba(63,185,80,0.2); color: var(--success); }
+    .history-item .badge.failed { background: rgba(248,81,73,0.2); color: var(--danger); }
+    .history-item .actions { margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .history-item .btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; margin-top: 0; }
+    #history-loading, #history-empty { color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0; }
   </style>
 </head>
 <body>
   <h1>数学讲解视频生成</h1>
-  <p>输入数学题目或上传题目图片，点击生成后等待处理，完成后可在页面内播放或下载视频。</p>
+  <p class="muted">输入数学题目或上传题目图片，生成后可在此查看历史、删除或重新生成。</p>
+
   <div>
     <label for="problem">题目（文字）</label>
     <textarea id="problem" placeholder="例如：求方程 x² = 1 的解"></textarea>
-    <div style="margin-top: 0.5rem;">
+    <div style="margin-top: 0.75rem;">
       <label for="image">或上传题目图片</label>
       <input type="file" id="image" accept="image/jpeg,image/png,image/gif,image/webp" />
-      <span id="imageName" style="margin-left: 0.5rem; color: #666;"></span>
+      <span id="imageName" class="muted" style="margin-left: 0.5rem;"></span>
     </div>
-    <button id="submit">生成视频</button>
+    <button id="submit" class="btn btn-primary">生成视频</button>
   </div>
-  <div id="status" style="display: none;"></div>
-  <div id="progress" style="display: none;" aria-live="polite">
-    <span class="progress-label">当前步骤：</span><span class="progress-step"></span>
-    <ul class="progress-steps"></ul>
+
+  <div id="progress-card" aria-live="polite">
+    <div id="status"></div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-bar"></div>
+    </div>
+    <div class="progress-meta" id="progress-meta"></div>
+    <div class="progress-stepper">
+      <ul id="progress-steps"></ul>
+    </div>
   </div>
   <div id="player">
     <video controls></video>
     <a id="download" href="" download="">下载视频</a>
   </div>
 
+  <h2 class="section-title">生成记录</h2>
+  <div id="history-loading" style="display: none;">加载中…</div>
+  <div id="history-empty" style="display: none;">暂无记录，生成一次即可在此查看。</div>
+  <div id="history-list"></div>
+
   <script>
     const problemEl = document.getElementById('problem');
     const imageEl = document.getElementById('image');
     const imageNameEl = document.getElementById('imageName');
     const submitBtn = document.getElementById('submit');
+    const progressCardEl = document.getElementById('progress-card');
     const statusEl = document.getElementById('status');
-    const progressEl = document.getElementById('progress');
-    const progressStepEl = progressEl.querySelector('.progress-step');
-    const progressStepsEl = progressEl.querySelector('.progress-steps');
+    const progressBarEl = document.getElementById('progress-bar');
+    const progressMetaEl = document.getElementById('progress-meta');
+    const progressStepsEl = document.getElementById('progress-steps');
     const playerEl = document.getElementById('player');
     const videoEl = playerEl.querySelector('video');
     const downloadEl = document.getElementById('download');
+    const historyListEl = document.getElementById('history-list');
+    const historyLoadingEl = document.getElementById('history-loading');
+    const historyEmptyEl = document.getElementById('history-empty');
+
+    var ALL_STEPS = ['识别题目图片', '公式交叉验证', '题目分析', '多模态脚本生成', 'TTS 与时长收集', '时长注入与 Manim 渲染', '音频拼接', '视频合成'];
 
     imageEl.addEventListener('change', function() {
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '';
     });
 
-    const ALL_STEPS = ['识别题目图片', '题目分析', '多模态脚本生成', 'TTS 与时长收集', '时长注入与 Manim 渲染', '音频拼接', '视频合成'];
-
     function showStatus(text, type) {
-      statusEl.style.display = 'block';
+      progressCardEl.classList.add('visible');
       statusEl.textContent = text;
       statusEl.className = type || '';
+      statusEl.style.display = 'block';
+      if (type === 'success' || type === 'failed') {
+        progressCardEl.classList.add('result-only');
+      } else {
+        progressCardEl.classList.remove('result-only');
+      }
     }
 
     function showProgress(currentStep) {
-      progressEl.style.display = 'block';
-      progressStepEl.textContent = currentStep || '—';
-      progressStepsEl.innerHTML = ALL_STEPS.map(function(s) {
-        var isCurrent = s === currentStep;
-        return '<li' + (isCurrent ? ' class="current"' : '') + '>' + (isCurrent ? '▶ ' : '') + s + '</li>';
+      progressCardEl.classList.remove('result-only');
+      var total = ALL_STEPS.length;
+      var currentIndex = currentStep ? ALL_STEPS.indexOf(currentStep) : -1;
+      if (currentIndex < 0) {
+        progressBarEl.classList.add('indeterminate');
+        progressBarEl.style.width = '';
+        progressMetaEl.textContent = currentStep ? ('当前：' + currentStep) : '正在启动…';
+      } else {
+        progressBarEl.classList.remove('indeterminate');
+        var pct = Math.round(((currentIndex + 1) / total) * 100);
+        progressBarEl.style.width = pct + '%';
+        progressMetaEl.textContent = '第 ' + (currentIndex + 1) + ' 步，共 ' + total + ' 步 · ' + currentStep;
+      }
+      progressStepsEl.innerHTML = ALL_STEPS.map(function(s, i) {
+        var state = 'pending';
+        if (currentIndex >= 0) {
+          if (i < currentIndex) state = 'done';
+          else if (i === currentIndex) state = 'current';
+        }
+        var icon = state === 'done' ? '✓' : (state === 'current' ? '●' : '○');
+        return '<li class="' + state + '"><span class="step-icon">' + icon + '</span><span>' + s + '</span></li>';
       }).join('');
     }
 
     function hideProgress() {
-      progressEl.style.display = 'none';
+      progressCardEl.classList.add('result-only');
     }
 
-    function pollTask(taskId) {
-      const url = '/api/tasks/' + encodeURIComponent(taskId);
+    function formatDate(iso) {
+      if (!iso) return '—';
+      try {
+        var d = new Date(iso);
+        var now = new Date();
+        var sameDay = d.toDateString() === now.toDateString();
+        if (sameDay) return '今天 ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      } catch (e) { return iso; }
+    }
+
+    function loadHistory() {
+      historyLoadingEl.style.display = 'block';
+      historyListEl.innerHTML = '';
+      historyEmptyEl.style.display = 'none';
+      fetch('/api/history?limit=50')
+        .then(function(r) { return r.json(); })
+        .then(function(items) {
+          historyLoadingEl.style.display = 'none';
+          if (!items || items.length === 0) {
+            historyEmptyEl.style.display = 'block';
+            return;
+          }
+          items.forEach(function(item) {
+            var div = document.createElement('div');
+            div.className = 'history-item';
+            var statusClass = item.status;
+            var statusText = { pending: '等待中', running: '生成中', success: '成功', failed: '失败' }[item.status] || item.status;
+            var html = '<div class="preview" title="' + (item.problem_preview || '').replace(/"/g, '&quot;') + '">' + (item.problem_preview || '—') + '</div>';
+            html += '<div class="meta"><span class="badge ' + statusClass + '">' + statusText + '</span><span>' + formatDate(item.created_at) + '</span></div>';
+            html += '<div class="actions">';
+            if (item.status === 'success' && item.video_path) {
+              html += '<button type="button" class="btn btn-ghost btn-play" data-task-id="' + item.task_id + '">播放</button>';
+              html += '<a class="btn btn-ghost" href="' + (item.video_path || ('/results/' + item.task_id + '.mp4')) + '" download="math_' + item.task_id + '.mp4">下载</a>';
+            }
+            html += '<button type="button" class="btn btn-ghost btn-regenerate" data-task-id="' + item.task_id + '">重新生成</button>';
+            html += '<button type="button" class="btn btn-danger btn-delete" data-task-id="' + item.task_id + '">删除</button>';
+            html += '</div>';
+            div.innerHTML = html;
+            historyListEl.appendChild(div);
+          });
+          historyListEl.querySelectorAll('.btn-play').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var taskId = btn.getAttribute('data-task-id');
+              var url = '/results/' + taskId + '.mp4';
+              videoEl.src = url;
+              downloadEl.href = url;
+              downloadEl.download = 'math_explainer.mp4';
+              playerEl.style.display = 'block';
+            });
+          });
+          historyListEl.querySelectorAll('.btn-regenerate').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var taskId = btn.getAttribute('data-task-id');
+              btn.disabled = true;
+              fetch('/api/regenerate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId })
+              })
+                .then(function(r) { return r.json().then(function(j) { if (!r.ok) throw new Error(j.detail || r.statusText); return j; }); })
+                .then(function(data) {
+                  showStatus('已提交重新生成…', 'running');
+                  pollTask(data.task_id, function() { loadHistory(); });
+                })
+                .catch(function(err) {
+                  showStatus('重新生成失败：' + (err.message || err), 'failed');
+                })
+                .finally(function() { btn.disabled = false; });
+            });
+          });
+          historyListEl.querySelectorAll('.btn-delete').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var taskId = btn.getAttribute('data-task-id');
+              if (!confirm('确定删除这条记录？')) return;
+              btn.disabled = true;
+              fetch('/api/history/' + encodeURIComponent(taskId), { method: 'DELETE' })
+                .then(function(r) {
+                  if (!r.ok) return r.json().then(function(j) { throw new Error(j.detail || r.statusText); });
+                  return r.json();
+                })
+                .then(function() { loadHistory(); })
+                .catch(function(err) { showStatus('删除失败：' + err.message, 'failed'); })
+                .finally(function() { btn.disabled = false; });
+            });
+          });
+        })
+        .catch(function(err) {
+          historyLoadingEl.style.display = 'none';
+          historyEmptyEl.style.display = 'block';
+          historyEmptyEl.textContent = '加载失败：' + (err.message || err);
+        });
+    }
+
+    function pollTask(taskId, onDone) {
+      var url = '/api/tasks/' + encodeURIComponent(taskId);
       function check() {
         fetch(url)
-          .then(r => r.json())
-          .then(data => {
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
             if (data.status === 'running' || data.status === 'pending') {
               showStatus('生成中…', 'running');
               showProgress(data.current_step || null);
@@ -100,31 +416,34 @@
             if (data.status === 'success') {
               showStatus('生成成功', 'success');
               hideProgress();
-              const videoUrl = data.video_url || ('/results/' + taskId + '.mp4');
+              var videoUrl = data.video_url || ('/results/' + taskId + '.mp4');
               videoEl.src = videoUrl;
               downloadEl.href = videoUrl;
               downloadEl.download = 'math_explainer.mp4';
               playerEl.style.display = 'block';
               submitBtn.disabled = false;
+              if (typeof onDone === 'function') onDone();
               return;
             }
             if (data.status === 'failed') {
               showStatus('生成失败：' + (data.error || '未知错误'), 'failed');
               hideProgress();
               submitBtn.disabled = false;
+              if (typeof onDone === 'function') onDone();
             }
           })
-          .catch(err => {
+          .catch(function(err) {
             showStatus('请求失败：' + err.message, 'failed');
             submitBtn.disabled = false;
+            if (typeof onDone === 'function') onDone();
           });
       }
       check();
     }
 
-    submitBtn.addEventListener('click', () => {
-      const problem = (problemEl.value || '').trim();
-      const imageFile = imageEl.files && imageEl.files[0];
+    submitBtn.addEventListener('click', function() {
+      var problem = (problemEl.value || '').trim();
+      var imageFile = imageEl.files && imageEl.files[0];
       if (!problem && !imageFile) {
         showStatus('请输入题目或上传题目图片', 'failed');
         return;
@@ -134,32 +453,31 @@
       showStatus(imageFile ? '正在识别图片并提交…' : '提交中…', 'running');
       showProgress(null);
 
-      const form = new FormData();
+      var form = new FormData();
       if (problem) form.append('problem', problem);
       if (imageFile) form.append('image', imageFile);
 
-      fetch('/api/generate_video', {
-        method: 'POST',
-        body: form
-      })
-        .then(r => {
-          if (!r.ok) return r.json().then(j => Promise.reject(new Error(j.detail || r.statusText)));
+      fetch('/api/generate_video', { method: 'POST', body: form })
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(j) { return Promise.reject(new Error(j.detail || r.statusText)); });
           return r.json();
         })
-        .then(data => {
+        .then(function(data) {
           if (data.task_id) {
             showStatus('已提交，生成中…', 'running');
-            pollTask(data.task_id);
+            pollTask(data.task_id, function() { loadHistory(); });
           } else {
             showStatus('提交失败', 'failed');
             submitBtn.disabled = false;
           }
         })
-        .catch(err => {
+        .catch(function(err) {
           showStatus('提交失败：' + (err.message || err), 'failed');
           submitBtn.disabled = false;
         });
     });
+
+    loadHistory();
   </script>
 </body>
 </html>

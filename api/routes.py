@@ -4,9 +4,25 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
-from api.models import GenerateVideoRequest, GenerateVideoResponse, TaskStatusResponse
+from api.models import (
+    GenerateVideoResponse,
+    HistoryItem,
+    RegenerateRequest,
+    RegenerateResponse,
+    TaskStatusResponse,
+)
 from api.pipeline import run_pipeline
-from api.task_store import create_task, get_task, set_failed, set_progress, set_running, set_success
+from api.task_store import (
+    create_task,
+    delete_task,
+    get_task,
+    set_failed,
+    set_progress,
+    set_running,
+    set_success,
+    update_task_problem,
+)
+from api.history_store import delete_record as history_delete, get_record as history_get, list_history
 from problem_analysis.formula_verifier import verify_and_fix_formulas
 from problem_analysis.image_to_text import extract_problem_text_from_image, image_to_base64
 
@@ -73,6 +89,8 @@ def _run_pipeline_task(
         if not (problem_text or "").strip():
             set_failed(task_id, "题目为空")
             return
+        # 持久化题目文本，便于历史列表展示与重新生成
+        update_task_problem(task_id, problem_text.strip())
         logger.info("[generate_video] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
 
         def on_step_start(step_index: int, step_name: str) -> None:
@@ -126,7 +144,8 @@ async def generate_video(
     if not problem_text and not image_bytes:
         raise HTTPException(status_code=400, detail="请提供题目文本或上传题目图片")
 
-    task_id = create_task()
+    problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
+    task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
     logger.info("[generate_video] 收到请求 task_id=%s 有文字=%s 有图片=%s", task_id, bool(problem_text), bool(image_bytes))
     background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type)
     return GenerateVideoResponse(task_id=task_id, status="pending")
@@ -144,3 +163,53 @@ async def get_task_status(task_id: str):
         error=task.error,
         current_step=task.current_step,
     )
+
+
+@router.get("/history", response_model=list[HistoryItem])
+async def get_history(limit: int = 50, offset: int = 0):
+    """分页获取历史记录，按创建时间倒序。"""
+    records = list_history(limit=min(limit, 100), offset=max(0, offset))
+    return [
+        HistoryItem(
+            task_id=r.task_id,
+            problem_preview=r.problem_preview,
+            status=r.status,
+            video_path=r.video_path,
+            error=r.error,
+            created_at=r.created_at,
+        )
+        for r in records
+    ]
+
+
+@router.delete("/history/{task_id}")
+async def delete_history(task_id: str):
+    """删除一条历史记录；若存在结果视频文件则一并删除。"""
+    if not history_delete(task_id):
+        raise HTTPException(status_code=404, detail="记录不存在")
+    delete_task(task_id)
+    result_file = RESULTS_DIR / f"{task_id}.mp4"
+    if result_file.exists():
+        try:
+            result_file.unlink()
+        except OSError:
+            pass
+    return {"ok": True}
+
+
+@router.post("/regenerate", response_model=RegenerateResponse)
+async def regenerate(background_tasks: BackgroundTasks, body: RegenerateRequest):
+    """根据历史任务 ID 使用其题目文本重新生成视频（仅文本，无原图）。"""
+    rec = history_get(body.task_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    problem_text = (rec.problem_text or "").strip()
+    if not problem_text:
+        raise HTTPException(
+            status_code=400,
+            detail="该记录无题目文本（如仅图片上传且未保存），无法重新生成",
+        )
+    problem_preview = (problem_text or "")[:120]
+    new_task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
+    background_tasks.add_task(_run_pipeline_task, new_task_id, problem_text, None, "image/jpeg")
+    return RegenerateResponse(task_id=new_task_id, status="pending")
