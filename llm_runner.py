@@ -102,7 +102,7 @@ def get_chat_model(
     max_tokens: int | None = None,
     timeout: float | None = None,
 ) -> BaseChatModel:
-    """返回配置好的 ChatModel（OpenAI），参数未传时使用配置文件。"""
+    """返回配置好的文本 ChatModel（OpenAI），参数未传时使用配置文件中的文本模型配置。"""
     s = get_settings()
     kwargs = {
         "model": model or s.llm_model,
@@ -114,6 +114,43 @@ def get_chat_model(
         kwargs["base_url"] = s.openai_base_url
     if max_tokens is not None or s.llm_max_tokens is not None:
         kwargs["max_tokens"] = max_tokens if max_tokens is not None else s.llm_max_tokens
+    return ChatOpenAI(**kwargs)
+
+
+def get_vision_model(
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+) -> BaseChatModel:
+    """
+    返回配置好的视觉 ChatModel（OpenAI），用于图片识别、带图分析等多模态任务。
+
+    优先使用 vision_* 配置，未设置时自动回退到文本模型的对应配置。
+    调用方传入的参数优先级最高。
+    """
+    s = get_settings()
+    kwargs = {
+        "model": model or s.vision_model or s.llm_model,
+        "temperature": temperature if temperature is not None else (
+            s.vision_temperature if s.vision_temperature is not None else s.llm_temperature
+        ),
+        "api_key": (s.vision_api_key or s.openai_api_key) or None,
+        "request_timeout": timeout if timeout is not None else (
+            s.vision_request_timeout if s.vision_request_timeout is not None else s.llm_request_timeout
+        ),
+    }
+    # base_url: 优先 vision_base_url，回退 openai_base_url
+    base_url = s.vision_base_url or s.openai_base_url
+    if base_url:
+        kwargs["base_url"] = base_url
+    # max_tokens: 调用方参数 > vision 配置 > 文本模型配置
+    effective_max_tokens = max_tokens if max_tokens is not None else (
+        s.vision_max_tokens if s.vision_max_tokens is not None else s.llm_max_tokens
+    )
+    if effective_max_tokens is not None:
+        kwargs["max_tokens"] = effective_max_tokens
     return ChatOpenAI(**kwargs)
 
 
@@ -157,11 +194,12 @@ def invoke_multimodal_plain(
     model: str | None = None,
 ) -> str:
     """
-    统一使用多模态大模型，返回纯文本。请求时区分是文字还是图片：
-    - content_type="text"：content 为文本，需传 text
-    - content_type="image"：content 为图片+提示，需传 image_base64（及可选 image_mime_type）
+    多模态大模型调用，返回纯文本。请求时区分是文字还是图片：
+    - content_type="text"：使用文本模型，content 为文本，需传 text
+    - content_type="image"：使用视觉模型，content 为图片+提示，需传 image_base64
     """
-    llm = get_chat_model(model=model)
+    # 图片走视觉模型，纯文本走文本模型
+    llm = get_vision_model(model=model) if content_type == "image" else get_chat_model(model=model)
     if content_type == "text":
         if text is None or text == "":
             raise ValueError("content_type 为 text 时需提供 text")
@@ -193,7 +231,7 @@ def invoke_vision_plain(
     *,
     model: str | None = None,
 ) -> str:
-    """调用多模态大模型识别图片内容，返回纯文本。内部使用 invoke_multimodal_plain(content_type="image")。"""
+    """调用视觉模型识别图片内容，返回纯文本。内部使用 invoke_multimodal_plain(content_type="image")。"""
     return invoke_multimodal_plain(
         prompt,
         content_type="image",
@@ -214,17 +252,19 @@ def invoke_multimodal_structured(
 ) -> T:
     """
     多模态结构化输出：同时传入文本提示与可选图片，返回 Pydantic 模型。
-    当 image_base64 不为空时，content 为 [text, image_url]；否则退化为纯文本结构化调用。
-
-    若模型不支持原生 structured output（如通过 OpenAI 兼容网关调用的 Claude），
-    会自动降级为普通调用 + 手动 JSON 提取。
+    当 image_base64 不为空时，使用视觉模型，content 为 [text, image_url]；
+    否则使用文本模型，退化为纯文本结构化调用。
     """
     logger.info(
         "[LLM] invoke_multimodal_structured 请求 schema=%s prompt_len=%d has_image=%s",
         schema.__name__, len(prompt), bool(image_base64),
     )
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    llm = get_chat_model(model=model, timeout=timeout)
+    # 有图片走视觉模型，纯文本走文本模型
+    if image_base64:
+        llm = get_vision_model(model=model, timeout=timeout)
+    else:
+        llm = get_chat_model(model=model, timeout=timeout)
     if image_base64:
         url = f"data:{image_mime_type};base64,{image_base64}"
         content: str | list = [
