@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ffmpeg_command: str = "ffmpeg"
 
     # 自愈：Manim 代码失败时 LLM 修复的最大重试次数
-    manim_self_heal_max_attempts: int = 3
+    manim_self_heal_max_attempts: int = 5
 
     # 默认 wait 时长（秒），用于时长不足时的兜底
     default_wait_seconds: float = 2.0

@@ -15,6 +15,10 @@
     #status.running { background: #e3f2fd; }
     #status.success { background: #e8f5e9; }
     #status.failed { background: #ffebee; }
+    #progress { margin-top: 0.5rem; font-size: 0.9rem; color: #1565c0; }
+    #progress ul { margin: 0.25rem 0 0 1.2rem; padding: 0; }
+    #progress li { margin: 0.15rem 0; }
+    #progress li.current { font-weight: 600; }
     #player { margin-top: 1rem; display: none; }
     #player video { width: 100%; max-height: 400px; }
     #player a { display: inline-block; margin-top: 0.5rem; }
@@ -34,6 +38,10 @@
     <button id="submit">生成视频</button>
   </div>
   <div id="status" style="display: none;"></div>
+  <div id="progress" style="display: none;" aria-live="polite">
+    <span class="progress-label">当前步骤：</span><span class="progress-step"></span>
+    <ul class="progress-steps"></ul>
+  </div>
   <div id="player">
     <video controls></video>
     <a id="download" href="" download="">下载视频</a>
@@ -45,6 +53,9 @@
     const imageNameEl = document.getElementById('imageName');
     const submitBtn = document.getElementById('submit');
     const statusEl = document.getElementById('status');
+    const progressEl = document.getElementById('progress');
+    const progressStepEl = progressEl.querySelector('.progress-step');
+    const progressStepsEl = progressEl.querySelector('.progress-steps');
     const playerEl = document.getElementById('player');
     const videoEl = playerEl.querySelector('video');
     const downloadEl = document.getElementById('download');
@@ -53,10 +64,25 @@
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '';
     });
 
+    const ALL_STEPS = ['识别题目图片', '题目分析', '多模态脚本生成', 'TTS 与时长收集', '时长注入与 Manim 渲染', '音频拼接', '视频合成'];
+
     function showStatus(text, type) {
       statusEl.style.display = 'block';
       statusEl.textContent = text;
       statusEl.className = type || '';
+    }
+
+    function showProgress(currentStep) {
+      progressEl.style.display = 'block';
+      progressStepEl.textContent = currentStep || '—';
+      progressStepsEl.innerHTML = ALL_STEPS.map(function(s) {
+        var isCurrent = s === currentStep;
+        return '<li' + (isCurrent ? ' class="current"' : '') + '>' + (isCurrent ? '▶ ' : '') + s + '</li>';
+      }).join('');
+    }
+
+    function hideProgress() {
+      progressEl.style.display = 'none';
     }
 
     function pollTask(taskId) {
@@ -67,11 +93,13 @@
           .then(data => {
             if (data.status === 'running' || data.status === 'pending') {
               showStatus('生成中…', 'running');
+              showProgress(data.current_step || null);
               setTimeout(check, 2000);
               return;
             }
             if (data.status === 'success') {
               showStatus('生成成功', 'success');
+              hideProgress();
               const videoUrl = data.video_url || ('/results/' + taskId + '.mp4');
               videoEl.src = videoUrl;
               downloadEl.href = videoUrl;
@@ -82,6 +110,7 @@
             }
             if (data.status === 'failed') {
               showStatus('生成失败：' + (data.error || '未知错误'), 'failed');
+              hideProgress();
               submitBtn.disabled = false;
             }
           })
@@ -103,6 +132,7 @@
       submitBtn.disabled = true;
       playerEl.style.display = 'none';
       showStatus(imageFile ? '正在识别图片并提交…' : '提交中…', 'running');
+      showProgress(null);
 
       const form = new FormData();
       if (problem) form.append('problem', problem);

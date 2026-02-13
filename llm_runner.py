@@ -130,3 +130,38 @@ def invoke_vision_plain(
         image_mime_type=mime_type,
         model=model,
     )
+
+
+def invoke_multimodal_structured(
+    prompt: str,
+    schema: type[T],
+    *,
+    image_base64: str | None = None,
+    image_mime_type: str = "image/jpeg",
+    model: str | None = None,
+    timeout: float | None = None,
+) -> T:
+    """
+    多模态结构化输出：同时传入文本提示与可选图片，返回 Pydantic 模型。
+    当 image_base64 不为空时，content 为 [text, image_url]；否则退化为纯文本结构化调用。
+    """
+    logger.info(
+        "[LLM] invoke_multimodal_structured 请求 schema=%s prompt_len=%d has_image=%s",
+        schema.__name__, len(prompt), bool(image_base64),
+    )
+    logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
+    llm = get_chat_model(model=model, timeout=timeout)
+    structured_llm = llm.with_structured_output(schema)
+    if image_base64:
+        url = f"data:{image_mime_type};base64,{image_base64}"
+        content: str | list = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": url}},
+        ]
+    else:
+        content = prompt
+    result = structured_llm.invoke([HumanMessage(content=content)])
+    out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
+    logger.info("[LLM] invoke_multimodal_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
+    logger.info("[LLM] response: %s", _truncate_for_log(out_str))
+    return result

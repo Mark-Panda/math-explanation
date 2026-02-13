@@ -6,8 +6,9 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 
 from api.models import GenerateVideoRequest, GenerateVideoResponse, TaskStatusResponse
 from api.pipeline import run_pipeline
-from api.task_store import create_task, get_task, set_failed, set_running, set_success
-from problem_analysis.image_to_text import extract_problem_text_from_image
+from api.task_store import create_task, get_task, set_failed, set_progress, set_running, set_success
+from problem_analysis.formula_verifier import verify_and_fix_formulas
+from problem_analysis.image_to_text import extract_problem_text_from_image, image_to_base64
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,12 +27,21 @@ def _run_pipeline_task(
     image_bytes: bytes | None = None,
     image_mime_type: str = "image/jpeg",
 ) -> None:
-    """后台执行：若有图片则先识别题目，再跑流水线。避免请求内长时间占用导致 nginx 504。"""
+    """后台执行：若有图片则先识别题目 → 公式验证 → 带原图跑流水线。"""
     output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
     logger.info("[generate_video] 后台任务开始 task_id=%s 有图片=%s", task_id, bool(image_bytes))
+
+    # 原图 base64（贯穿流水线，让后续 LLM 调用都能看到原图）
+    img_b64: str | None = None
+
     try:
         set_running(task_id)
+
+        # ---------- 有图片：OCR → 公式验证 → 保留 base64 ----------
         if image_bytes:
+            img_b64 = image_to_base64(image_bytes)
+
+            set_progress(task_id, "识别题目图片")
             logger.info("[generate_video] task_id=%s 正在识别题目图片…", task_id)
             try:
                 problem_text = extract_problem_text_from_image(image_bytes, mime_type=image_mime_type)
@@ -40,15 +50,42 @@ def _run_pipeline_task(
                 logger.exception("[generate_video] task_id=%s 图片识别失败: %s", task_id, e)
                 set_failed(task_id, f"图片识别失败: {e}")
                 return
+
             if not (problem_text or "").strip():
                 logger.warning("[generate_video] task_id=%s 图片未识别出文字", task_id)
                 set_failed(task_id, "未能从图片中识别出题目文字")
                 return
+
+            # ---------- 公式交叉验证（P2）：用原图校正 OCR 文本 ----------
+            set_progress(task_id, "公式交叉验证")
+            logger.info("[generate_video] task_id=%s 开始公式交叉验证", task_id)
+            try:
+                problem_text = verify_and_fix_formulas(
+                    problem_text,
+                    image_base64=img_b64,
+                    image_mime_type=image_mime_type,
+                )
+                logger.info("[generate_video] task_id=%s 公式验证完成 验证后长度=%d", task_id, len(problem_text or ""))
+            except Exception as e:
+                logger.warning("[generate_video] task_id=%s 公式验证失败（不阻塞）: %s", task_id, e)
+                # 验证失败不阻塞流水线，继续使用 OCR 原始文本
+
         if not (problem_text or "").strip():
             set_failed(task_id, "题目为空")
             return
         logger.info("[generate_video] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
-        video_path = run_pipeline(problem_text.strip(), output_dir)
+
+        def on_step_start(step_index: int, step_name: str) -> None:
+            set_progress(task_id, step_name)
+
+        # ---------- 执行流水线（传入原图 base64） ----------
+        video_path = run_pipeline(
+            problem_text.strip(),
+            output_dir,
+            image_base64=img_b64,
+            image_mime_type=image_mime_type,
+            on_step_start=on_step_start,
+        )
         result_path = RESULTS_DIR / f"{task_id}.mp4"
         import shutil
         shutil.copy(str(video_path), str(result_path))
@@ -105,4 +142,5 @@ async def get_task_status(task_id: str):
         status=task.status,
         video_url=task.video_path if task.status == "success" else None,
         error=task.error,
+        current_step=task.current_step,
     )

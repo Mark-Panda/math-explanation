@@ -28,25 +28,25 @@ uv sync
 
 **大模型（LLM）相关：**
 
-| 变量 | 说明 | 默认/示例 |
-|------|------|-----------|
-| `OPENAI_API_KEY` | **必填**，OpenAI 或兼容接口的 API Key | `sk-...` |
-| `OPENAI_BASE_URL` | 可选，自定义 API 基础 URL（代理、Azure、国内中转） | |
-| `LLM_MODEL` | 模型名称 | `gpt-4o` |
-| `LLM_TEMPERATURE` | 生成温度（0~2，建议 0.1~0.3） | `0.2` |
-| `LLM_MAX_TOKENS` | 单次请求最大 token 数 | 不设则用模型默认 |
-| `LLM_REQUEST_TIMEOUT` | 单次请求超时（秒） | `120` |
-| `LLM_SCRIPT_TIMEOUT` | 脚本生成阶段超时（秒，建议 ≥300） | `300` |
+| 变量                  | 说明                                               | 默认/示例        |
+| --------------------- | -------------------------------------------------- | ---------------- |
+| `OPENAI_API_KEY`      | **必填**，OpenAI 或兼容接口的 API Key              | `sk-...`         |
+| `OPENAI_BASE_URL`     | 可选，自定义 API 基础 URL（代理、Azure、国内中转） |                  |
+| `LLM_MODEL`           | 模型名称                                           | `gpt-4o`         |
+| `LLM_TEMPERATURE`     | 生成温度（0~2，建议 0.1~0.3）                      | `0.2`            |
+| `LLM_MAX_TOKENS`      | 单次请求最大 token 数                              | 不设则用模型默认 |
+| `LLM_REQUEST_TIMEOUT` | 单次请求超时（秒）                                 | `120`            |
+| `LLM_SCRIPT_TIMEOUT`  | 脚本生成阶段超时（秒，建议 ≥300）                  | `300`            |
 
 **其他：**
 
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `TTS_VOICE` | Edge-TTS 音色 | `zh-CN-XiaoxiaoNeural` |
-| `MANIM_COMMAND` | Manim 命令行 | `manim` |
-| `FFMPEG_COMMAND` | FFmpeg 命令行 | `ffmpeg` |
-| `MANIM_SELF_HEAL_MAX_ATTEMPTS` | Manim 代码自愈最大重试次数 | `3` |
-| `DEFAULT_WAIT_SECONDS` | 时长不足时默认 wait（秒） | `2.0` |
+| 变量                           | 说明                       | 默认                   |
+| ------------------------------ | -------------------------- | ---------------------- |
+| `TTS_VOICE`                    | Edge-TTS 音色              | `zh-CN-XiaoxiaoNeural` |
+| `MANIM_COMMAND`                | Manim 命令行               | `manim`                |
+| `FFMPEG_COMMAND`               | FFmpeg 命令行              | `ffmpeg`               |
+| `MANIM_SELF_HEAL_MAX_ATTEMPTS` | Manim 代码自愈最大重试次数 | `3`                    |
+| `DEFAULT_WAIT_SECONDS`         | 时长不足时默认 wait（秒）  | `2.0`                  |
 
 ## 本地运行方式
 

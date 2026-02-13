@@ -1,4 +1,4 @@
-"""内存任务状态存储：task_id -> status, video_path, error。"""
+"""内存任务状态存储：task_id -> status, video_path, error, current_step。"""
 from dataclasses import dataclass
 from typing import Optional
 import uuid
@@ -9,6 +9,7 @@ class TaskState:
     status: str  # pending | running | success | failed
     video_path: Optional[str] = None
     error: Optional[str] = None
+    current_step: Optional[str] = None  # 当前执行步骤，用于前端进度展示
 
 
 _tasks: dict[str, TaskState] = {}
@@ -25,11 +26,18 @@ def set_running(task_id: str) -> None:
         _tasks[task_id].status = "running"
 
 
+def set_progress(task_id: str, current_step: str) -> None:
+    """更新任务当前步骤，供前端进度显示。"""
+    if task_id in _tasks:
+        _tasks[task_id].current_step = current_step
+
+
 def set_success(task_id: str, video_path: str) -> None:
     if task_id in _tasks:
         _tasks[task_id].status = "success"
         _tasks[task_id].video_path = video_path
         _tasks[task_id].error = None
+        _tasks[task_id].current_step = None
 
 
 def set_failed(task_id: str, error: str) -> None:
@@ -37,6 +45,7 @@ def set_failed(task_id: str, error: str) -> None:
         _tasks[task_id].status = "failed"
         _tasks[task_id].error = error
         _tasks[task_id].video_path = None
+        _tasks[task_id].current_step = None
 
 
 def get_task(task_id: str) -> Optional[TaskState]:

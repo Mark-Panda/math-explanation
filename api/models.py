@@ -16,3 +16,4 @@ class TaskStatusResponse(BaseModel):
     status: str = Field(..., description="pending | running | success | failed")
     video_url: str | None = Field(None, description="成功时的结果视频 URL（相对或绝对）")
     error: str | None = Field(None, description="失败时的错误信息")
+    current_step: str | None = Field(None, description="当前执行步骤，用于前端进度显示")
