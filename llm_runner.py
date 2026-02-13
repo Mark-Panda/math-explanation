@@ -1,5 +1,7 @@
 """基于 LangChain 的可复用 LLM 调用，供题目分析、脚本生成、代码自愈共用。文字与图片题目统一走多模态大模型，仅请求时区分 content 类型。"""
+import json
 import logging
+import re
 from typing import Literal, TypeVar
 
 from langchain_core.language_models import BaseChatModel
@@ -21,6 +23,76 @@ def _truncate_for_log(s: str, max_len: int = _LOG_CONTENT_MAX) -> str:
     if len(s) <= max_len:
         return s
     return s[:max_len] + f"... [截断，共 {len(s)} 字]"
+
+
+def _extract_json_from_text(text: str) -> str:
+    """
+    从 LLM 返回的文本中提取 JSON 字符串。
+
+    某些模型（如通过兼容网关调用的 Claude）不支持原生 structured output，
+    会返回 Markdown 代码块包裹的 JSON。本函数尝试：
+    1. 提取 ```json ... ``` 或 ``` ... ``` 中的内容
+    2. 若无代码块，尝试找到第一个 { 和最后一个 } 之间的内容
+    3. 都失败则返回原文本（交给调用方报错）
+    """
+    # 尝试匹配 ```json ... ``` 或 ``` ... ```
+    pattern = r"```(?:json)?\s*\n?(.*?)\n?\s*```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    # 尝试找到最外层 JSON 对象
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace : last_brace + 1]
+        # 简单验证是否为合法 JSON
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    return text
+
+
+def _invoke_and_parse(
+    llm: BaseChatModel,
+    content: str | list,
+    schema: type[T],
+) -> T:
+    """
+    普通调用 LLM 并手动提取 JSON 解析为 Pydantic 模型。
+
+    在 prompt 末尾追加 JSON 格式约束，引导模型直接返回 JSON；
+    即便模型返回 Markdown 代码块包裹的 JSON，也能通过 _extract_json_from_text 提取。
+
+    不使用 with_structured_output，因为当前网关不支持 OpenAI 原生 response_format。
+    """
+    json_hint = (
+        "\n\n**重要：请只输出纯 JSON，不要包含 Markdown 代码块（```）、注释或任何其他文字。**"
+        f"\nJSON Schema: {json.dumps(schema.model_json_schema(), ensure_ascii=False)}"
+    )
+    if isinstance(content, list):
+        # 多模态：在 text 部分追加提示
+        patched_content = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                patched_content.append({**item, "text": item["text"] + json_hint})
+            else:
+                patched_content.append(item)
+        msg = llm.invoke([HumanMessage(content=patched_content)])
+    else:
+        msg = llm.invoke([HumanMessage(content=content + json_hint)])
+
+    raw_content = msg.content if hasattr(msg, "content") else str(msg)
+    logger.info("[LLM] 调用完成, raw_len=%d", len(raw_content))
+    logger.debug("[LLM] raw response: %s", _truncate_for_log(raw_content))
+
+    # 提取 JSON 并解析
+    extracted = _extract_json_from_text(raw_content)
+    logger.info("[LLM] 提取 JSON, extracted_len=%d", len(extracted))
+    return schema.model_validate_json(extracted)
 
 
 def get_chat_model(
@@ -56,8 +128,7 @@ def invoke_structured(
     logger.info("[LLM] invoke_structured 请求 schema=%s prompt_len=%d", schema.__name__, len(prompt))
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
     llm = get_chat_model(model=model, timeout=timeout)
-    structured_llm = llm.with_structured_output(schema)
-    result = structured_llm.invoke([HumanMessage(content=prompt)])
+    result = _invoke_and_parse(llm, prompt, schema)
     out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
     logger.info("[LLM] invoke_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
     logger.info("[LLM] response: %s", _truncate_for_log(out_str))
@@ -144,6 +215,9 @@ def invoke_multimodal_structured(
     """
     多模态结构化输出：同时传入文本提示与可选图片，返回 Pydantic 模型。
     当 image_base64 不为空时，content 为 [text, image_url]；否则退化为纯文本结构化调用。
+
+    若模型不支持原生 structured output（如通过 OpenAI 兼容网关调用的 Claude），
+    会自动降级为普通调用 + 手动 JSON 提取。
     """
     logger.info(
         "[LLM] invoke_multimodal_structured 请求 schema=%s prompt_len=%d has_image=%s",
@@ -151,7 +225,6 @@ def invoke_multimodal_structured(
     )
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
     llm = get_chat_model(model=model, timeout=timeout)
-    structured_llm = llm.with_structured_output(schema)
     if image_base64:
         url = f"data:{image_mime_type};base64,{image_base64}"
         content: str | list = [
@@ -160,7 +233,7 @@ def invoke_multimodal_structured(
         ]
     else:
         content = prompt
-    result = structured_llm.invoke([HumanMessage(content=content)])
+    result = _invoke_and_parse(llm, content, schema)
     out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
     logger.info("[LLM] invoke_multimodal_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
     logger.info("[LLM] response: %s", _truncate_for_log(out_str))
