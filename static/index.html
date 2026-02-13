@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数学讲解视频生成</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 1.5rem; }
+    h1 { margin-top: 0; }
+    textarea { width: 100%; min-height: 120px; padding: 0.5rem; }
+    button { padding: 0.5rem 1rem; margin-top: 0.5rem; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #status { margin-top: 1rem; padding: 0.5rem; border-radius: 4px; }
+    #status.running { background: #e3f2fd; }
+    #status.success { background: #e8f5e9; }
+    #status.failed { background: #ffebee; }
+    #player { margin-top: 1rem; display: none; }
+    #player video { width: 100%; max-height: 400px; }
+    #player a { display: inline-block; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>数学讲解视频生成</h1>
+  <p>输入数学题目或上传题目图片，点击生成后等待处理，完成后可在页面内播放或下载视频。</p>
+  <div>
+    <label for="problem">题目（文字）</label>
+    <textarea id="problem" placeholder="例如：求方程 x² = 1 的解"></textarea>
+    <div style="margin-top: 0.5rem;">
+      <label for="image">或上传题目图片</label>
+      <input type="file" id="image" accept="image/jpeg,image/png,image/gif,image/webp" />
+      <span id="imageName" style="margin-left: 0.5rem; color: #666;"></span>
+    </div>
+    <button id="submit">生成视频</button>
+  </div>
+  <div id="status" style="display: none;"></div>
+  <div id="player">
+    <video controls></video>
+    <a id="download" href="" download="">下载视频</a>
+  </div>
+
+  <script>
+    const problemEl = document.getElementById('problem');
+    const imageEl = document.getElementById('image');
+    const imageNameEl = document.getElementById('imageName');
+    const submitBtn = document.getElementById('submit');
+    const statusEl = document.getElementById('status');
+    const playerEl = document.getElementById('player');
+    const videoEl = playerEl.querySelector('video');
+    const downloadEl = document.getElementById('download');
+
+    imageEl.addEventListener('change', function() {
+      imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '';
+    });
+
+    function showStatus(text, type) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = text;
+      statusEl.className = type || '';
+    }
+
+    function pollTask(taskId) {
+      const url = '/api/tasks/' + encodeURIComponent(taskId);
+      function check() {
+        fetch(url)
+          .then(r => r.json())
+          .then(data => {
+            if (data.status === 'running' || data.status === 'pending') {
+              showStatus('生成中…', 'running');
+              setTimeout(check, 2000);
+              return;
+            }
+            if (data.status === 'success') {
+              showStatus('生成成功', 'success');
+              const videoUrl = data.video_url || ('/results/' + taskId + '.mp4');
+              videoEl.src = videoUrl;
+              downloadEl.href = videoUrl;
+              downloadEl.download = 'math_explainer.mp4';
+              playerEl.style.display = 'block';
+              submitBtn.disabled = false;
+              return;
+            }
+            if (data.status === 'failed') {
+              showStatus('生成失败：' + (data.error || '未知错误'), 'failed');
+              submitBtn.disabled = false;
+            }
+          })
+          .catch(err => {
+            showStatus('请求失败：' + err.message, 'failed');
+            submitBtn.disabled = false;
+          });
+      }
+      check();
+    }
+
+    submitBtn.addEventListener('click', () => {
+      const problem = (problemEl.value || '').trim();
+      const imageFile = imageEl.files && imageEl.files[0];
+      if (!problem && !imageFile) {
+        showStatus('请输入题目或上传题目图片', 'failed');
+        return;
+      }
+      submitBtn.disabled = true;
+      playerEl.style.display = 'none';
+      showStatus(imageFile ? '正在识别图片并提交…' : '提交中…', 'running');
+
+      const form = new FormData();
+      if (problem) form.append('problem', problem);
+      if (imageFile) form.append('image', imageFile);
+
+      fetch('/api/generate_video', {
+        method: 'POST',
+        body: form
+      })
+        .then(r => {
+          if (!r.ok) return r.json().then(j => Promise.reject(new Error(j.detail || r.statusText)));
+          return r.json();
+        })
+        .then(data => {
+          if (data.task_id) {
+            showStatus('已提交，生成中…', 'running');
+            pollTask(data.task_id);
+          } else {
+            showStatus('提交失败', 'failed');
+            submitBtn.disabled = false;
+          }
+        })
+        .catch(err => {
+          showStatus('提交失败：' + (err.message || err), 'failed');
+          submitBtn.disabled = false;
+        });
+    });
+  </script>
+</body>
+</html>

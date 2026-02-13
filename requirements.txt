@@ -1,0 +1,25 @@
+# LLM（LangChain）
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
+
+# 配置
+pydantic>=2.0
+pydantic-settings>=2.0
+
+# TTS（Edge-TTS 免费、无需 key）
+edge-tts>=6.1.0
+
+# API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+
+# 数学动画（需系统安装 ffmpeg 与 latex；manim 体积大，可按需安装）
+# manim>=0.18.0
+
+# 可选：FFmpeg 封装（也可用 subprocess 直接调 ffmpeg）
+# ffmpeg-python>=0.2.0
+
+# 测试
+pytest>=8.0
