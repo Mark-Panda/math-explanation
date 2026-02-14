@@ -215,8 +215,9 @@ async def retry_task(background_tasks: BackgroundTasks, task_id: str):
     rec = history_get(task_id)
     if not rec or not (rec.problem_text or "").strip():
         raise HTTPException(status_code=400, detail="该记录无题目文本，无法断点重试")
+    set_running(task_id)  # 立即置为 running，避免前端首次轮询仍拿到 failed
     background_tasks.add_task(_run_pipeline_task_retry, task_id)
-    return GenerateVideoResponse(task_id=task_id, status="pending")
+    return GenerateVideoResponse(task_id=task_id, status="running")
 
 
 @router.get("/history", response_model=list[HistoryItem])

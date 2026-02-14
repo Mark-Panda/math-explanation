@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     vision_request_timeout: float | None = None
     """视觉模型单次请求超时秒数，不设则使用 llm_request_timeout。"""
 
-    # TTS（edge-tts 用 voice 名）
+    # TTS（edge-tts 音色名，建议在 .env 中显式设置，整批步骤会固定使用该音色）
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
 
     # 自愈：HTML 动画代码校验失败时 LLM 修复的最大重试次数

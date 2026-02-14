@@ -20,93 +20,124 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
       font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #1a1a2e;
+      background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
       color: #e6e6e6;
+      min-height: 100vh;
+      padding: 2rem 1rem;
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
-      padding: 2rem 1rem;
     }}
-    h1 {{
-      font-size: 1.5rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
+    .player-card {{
+      width: 100%;
+      max-width: 840px;
+      background: #f6f8fa;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06);
+      overflow: hidden;
+      animation: card-in 0.4s ease-out;
+    }}
+    @keyframes card-in {{
+      from {{ opacity: 0; transform: translateY(12px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .player-header {{
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, #1e3a5f 0%, #16213e 100%);
       color: #e6e6e6;
     }}
-    #animation-wrapper {{
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    .player-header .progress-wrap {{
+      flex: 1;
+      min-width: 120px;
+      height: 6px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 3px;
       overflow: hidden;
-      margin-bottom: 1.5rem;
+    }}
+    .player-header #progress-fill {{
+      height: 100%;
+      background: linear-gradient(90deg, #58a6ff, #7ee8fa);
+      border-radius: 3px;
+      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      width: 0%;
     }}
     #controls {{
       display: flex;
       align-items: center;
-      gap: 1rem;
-      padding: 0.75rem 1.5rem;
-      background: #16213e;
-      border-radius: 8px;
-      margin-bottom: 1rem;
+      gap: 0.75rem;
     }}
     #controls button {{
       padding: 0.5rem 1.25rem;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       cursor: pointer;
       font-size: 0.9rem;
       font-weight: 500;
-      transition: all 0.2s;
+      transition: transform 0.15s, box-shadow 0.2s;
     }}
+    #controls button:active {{ transform: scale(0.98); }}
     #btn-play {{
-      background: #58a6ff;
+      background: linear-gradient(180deg, #58a6ff, #388bfd);
       color: #fff;
+      box-shadow: 0 2px 8px rgba(56,139,253,0.4);
     }}
-    #btn-play:hover {{ background: #79b8ff; }}
-    #btn-play:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+    #btn-play:hover:not(:disabled) {{ box-shadow: 0 4px 14px rgba(56,139,253,0.5); }}
+    #btn-play:disabled {{ opacity: 0.6; cursor: not-allowed; box-shadow: none; }}
     #btn-reset {{
-      background: transparent;
-      color: #8b949e;
-      border: 1px solid #30363d;
+      background: rgba(255,255,255,0.12);
+      color: #c9d1d9;
+      border: 1px solid rgba(255,255,255,0.18);
     }}
-    #btn-reset:hover {{ color: #e6e6e6; border-color: #8b949e; }}
+    #btn-reset:hover {{ background: rgba(255,255,255,0.18); color: #e6e6e6; }}
     #step-info {{
       color: #8b949e;
       font-size: 0.85rem;
+      min-width: 7em;
     }}
-    #progress-bar {{
-      width: 100%;
-      height: 4px;
-      background: #30363d;
-      border-radius: 2px;
-      overflow: hidden;
-      margin-bottom: 1rem;
+    #step-info.done {{ color: #3fb950; font-weight: 500; }}
+    #animation-wrapper {{
+      background: #f0f2f5;
+      min-height: 420px;
+      padding: 1.5rem;
+      border-top: 1px solid #e1e4e8;
     }}
-    #progress-fill {{
-      height: 100%;
-      background: linear-gradient(90deg, #58a6ff, #79b8ff);
-      border-radius: 2px;
-      transition: width 0.3s ease-out;
-      width: 0%;
+    #animation-wrapper #animation-container {{
+      min-height: 360px;
+      border-radius: 12px;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+      color: #24292f;
     }}
   </style>
 </head>
 <body>
-  <h1>数学讲解动画</h1>
-  <div id="progress-bar"><div id="progress-fill"></div></div>
-  <div id="controls">
-    <button id="btn-play">▶ 播放</button>
-    <button id="btn-reset">重置</button>
-    <span id="step-info">共 <span id="total-steps">0</span> 步</span>
-  </div>
-  <div id="animation-wrapper">
-    {animation_html}
+  <div class="player-card">
+    <div class="player-header">
+      <div class="progress-wrap"><div id="progress-fill"></div></div>
+      <div id="controls">
+        <button id="btn-play">▶ 播放</button>
+        <button id="btn-reset">重置</button>
+        <span id="step-info">共 <span id="total-steps">0</span> 步</span>
+      </div>
+    </div>
+    <div id="animation-wrapper">
+      {animation_html}
+    </div>
   </div>
 
   <!-- 内嵌音频 -->
   {audio_elements}
 
+  <style>
+    /* 覆盖生成内容：保证动画区内背景与文字对比度，提升可读性 */
+    #animation-wrapper #animation-container {{
+      background: #f6f8fa !important;
+      color: #1f2328 !important;
+    }}
+  </style>
   <script>
   (function() {{
     var steps = window.stepAnimations || [];
@@ -124,13 +155,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     function updateUI() {{
       if (currentStep >= totalSteps) {{
-        stepInfo.innerHTML = '已完成 ' + totalSteps + ' 步';
+        stepInfo.innerHTML = '✓ 已完成 ' + totalSteps + ' 步';
+        stepInfo.classList.add('done');
         playBtn.textContent = '▶ 播放';
         playBtn.disabled = false;
         playing = false;
         progressFill.style.width = '100%';
       }} else {{
         stepInfo.innerHTML = '第 ' + (currentStep + 1) + ' / ' + totalSteps + ' 步';
+        stepInfo.classList.remove('done');
         progressFill.style.width = ((currentStep / totalSteps) * 100) + '%';
       }}
     }}

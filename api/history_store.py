@@ -20,6 +20,7 @@ class HistoryRecord:
     status: str  # pending | running | success | failed
     video_path: Optional[str] = None
     error: Optional[str] = None
+    current_step: Optional[str] = None  # 当前执行步骤，供断点重试时前端展示
     created_at: str = ""
     updated_at: str = ""
 
@@ -54,6 +55,11 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_history_created_at ON history(created_at DESC)"
         )
+        # 兼容旧库：若无 current_step 列则添加
+        cur = conn.execute("PRAGMA table_info(history)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "current_step" not in columns:
+            conn.execute("ALTER TABLE history ADD COLUMN current_step TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -67,6 +73,7 @@ def _row_to_record(row: sqlite3.Row) -> HistoryRecord:
         status=row["status"],
         video_path=row["video_path"],
         error=row["error"],
+        current_step=row["current_step"] if "current_step" in row.keys() else None,
         created_at=row["created_at"] or "",
         updated_at=row["updated_at"] or "",
     )
@@ -123,13 +130,27 @@ def update_status(
     video_path: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
-    """更新任务状态与结果。"""
+    """更新任务状态与结果；同时清空 current_step，避免展示旧进度。"""
     now = _now_iso()
     conn = _get_conn()
     try:
         conn.execute(
-            "UPDATE history SET status = ?, video_path = ?, error = ?, updated_at = ? WHERE task_id = ?",
+            "UPDATE history SET status = ?, video_path = ?, error = ?, current_step = NULL, updated_at = ? WHERE task_id = ?",
             (status, video_path, error, now, task_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_progress(task_id: str, current_step: str) -> None:
+    """仅更新当前步骤（用于运行中任务的进度展示，断点重试时前端可正确显示）。"""
+    now = _now_iso()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "UPDATE history SET current_step = ?, updated_at = ? WHERE task_id = ?",
+            (current_step, now, task_id),
         )
         conn.commit()
     finally:

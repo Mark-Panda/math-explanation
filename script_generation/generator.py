@@ -193,7 +193,7 @@ def _assemble_html(
     steps_js = ",\n".join(steps_js_items)
 
     html = f"""{css_block}
-<div id="animation-container" style="width:800px;height:600px;background:#fff;position:relative;overflow:hidden;margin:0 auto;">
+<div id="animation-container" style="width:800px;height:600px;background:#f6f8fa;position:relative;overflow:hidden;margin:0 auto;">
 {svg_block}
 </div>
 <script>

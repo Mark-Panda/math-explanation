@@ -29,24 +29,39 @@ def _extract_json_from_text(text: str) -> str:
     """
     从 LLM 返回的文本中提取 JSON 字符串。
 
-    某些模型（如通过兼容网关调用的 Claude）不支持原生 structured output，
-    会返回 Markdown 代码块包裹的 JSON。本函数尝试：
-    1. 提取 ```json ... ``` 或 ``` ... ``` 中的内容
-    2. 若无代码块，尝试找到第一个 { 和最后一个 } 之间的内容
-    3. 都失败则返回原文本（交给调用方报错）
+    某些模型会返回多个代码块（如先 ```javascript 再 ```json），或只返回非 JSON 代码。
+    本函数尝试：
+    1. 优先提取 ```json ... ``` 中的内容
+    2. 否则遍历所有 ```...``` 块，返回第一个能解析为合法 JSON 的块
+    3. 若无代码块或均非 JSON，尝试第一个 { 到最后一个 } 之间的内容
+    4. 都失败则返回原文本（交给调用方报错）
     """
-    # 尝试匹配 ```json ... ``` 或 ``` ... ```
-    pattern = r"```(?:json)?\s*\n?(.*?)\n?\s*```"
-    match = re.search(pattern, text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    # 1. 优先 ```json ... ```
+    json_block = re.search(r"```json\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if json_block:
+        candidate = json_block.group(1).strip()
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
 
-    # 尝试找到最外层 JSON 对象
+    # 2. 所有 ```...``` 块，取第一个能解析为 JSON 的
+    for match in re.finditer(r"```(?:\w+)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL):
+        candidate = match.group(1).strip()
+        if not candidate:
+            continue
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            continue
+
+    # 3. 最外层 { ... }
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         candidate = text[first_brace : last_brace + 1]
-        # 简单验证是否为合法 JSON
         try:
             json.loads(candidate)
             return candidate
@@ -54,6 +69,16 @@ def _extract_json_from_text(text: str) -> str:
             pass
 
     return text
+
+
+def _strip_any_code_block(text: str) -> str:
+    """去掉 Markdown 代码块围栏（如 ```javascript 或 ```），返回块内内容。"""
+    s = text.strip()
+    pattern = r"^```(?:\w+)?\s*\n?(.*?)\n?\s*```$"
+    match = re.match(pattern, s, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return s
 
 
 def _invoke_and_parse(
@@ -92,7 +117,16 @@ def _invoke_and_parse(
     # 提取 JSON 并解析
     extracted = _extract_json_from_text(raw_content)
     logger.info("[LLM] 提取 JSON, extracted_len=%d", len(extracted))
-    return schema.model_validate_json(extracted)
+    try:
+        return schema.model_validate_json(extracted)
+    except Exception as e:
+        # 部分模型对 StepCodeOutput 只返回代码块而非 JSON，将提取内容视为 animate_body
+        if schema.__name__ == "StepCodeOutput" and extracted and extracted.strip():
+            code = _strip_any_code_block(extracted)
+            if code.strip():
+                logger.info("[LLM] StepCodeOutput 解析 JSON 失败，改为将提取内容作为 animate_body 使用")
+                return schema(animate_body=code)
+        raise
 
 
 def get_chat_model(

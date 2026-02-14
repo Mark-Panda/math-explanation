@@ -6,6 +6,7 @@ import uuid
 from api.history_store import (
     create_record as history_create,
     update_problem as history_update_problem,
+    update_progress as history_update_progress,
     update_status as history_update_status,
     get_record as history_get_record,
 )
@@ -30,15 +31,30 @@ def create_task(problem_preview: str = "", problem_text: Optional[str] = None) -
 
 
 def set_running(task_id: str) -> None:
-    if task_id in _tasks:
+    """置为运行中；若任务不在内存（如断点重试从历史加载），先放入 _tasks 以便 set_progress/get_task 生效。"""
+    if task_id not in _tasks:
+        rec = history_get_record(task_id)
+        if rec:
+            _tasks[task_id] = TaskState(
+                task_id=rec.task_id,
+                status="running",
+                result_path=rec.video_path,
+                error=rec.error,
+                current_step=None,
+            )
+        else:
+            _tasks[task_id] = TaskState(task_id=task_id, status="running")
+    else:
         _tasks[task_id].status = "running"
+        _tasks[task_id].current_step = None
     history_update_status(task_id, "running")
 
 
 def set_progress(task_id: str, current_step: str) -> None:
-    """更新任务当前步骤，供前端进度显示。"""
+    """更新任务当前步骤，供前端进度显示；同时持久化以便断点重试时任意 worker 都能返回进度。"""
     if task_id in _tasks:
         _tasks[task_id].current_step = current_step
+    history_update_progress(task_id, current_step)
 
 
 def set_success(task_id: str, result_path: str) -> None:
@@ -76,7 +92,7 @@ def get_task(task_id: str) -> Optional[TaskState]:
         status=rec.status,
         result_path=rec.video_path,
         error=rec.error,
-        current_step=None,
+        current_step=getattr(rec, "current_step", None),
     )
 
 
