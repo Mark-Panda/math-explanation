@@ -237,24 +237,69 @@
     .history-item .actions { margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.35rem; }
     .history-item .btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; margin-top: 0; }
     #history-loading, #history-empty { color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0; }
+
+    .input-mode-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .input-mode-tabs .tab {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      margin-bottom: -1px;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .input-mode-tabs .tab:hover { color: var(--text); }
+    .input-mode-tabs .tab.active {
+      color: var(--accent);
+      font-weight: 500;
+      border-bottom-color: var(--accent);
+    }
+    .input-panel {
+      display: none;
+      padding: 0.75rem 0 0;
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 var(--radius) var(--radius);
+      background: var(--surface);
+    }
+    .input-panel.active { display: block; }
+    .input-panel-inner { padding: 0 1rem 1rem; }
   </style>
 </head>
 <body>
   <h1>数学讲解动画生成</h1>
   <p class="muted">输入数学题目或上传题目图片，生成交互式网页动画讲解。可在此查看历史、删除或重新生成。</p>
 
-  <div>
-    <label for="problem">题目（文字）</label>
-    <textarea id="problem" placeholder="例如：求方程 x² = 1 的解"></textarea>
-    <div style="margin-top: 0.75rem;">
-      <label for="image">或上传题目图片</label>
-      <div class="file-upload-wrap">
-        <input type="file" id="image" accept="image/jpeg,image/png,image/gif,image/webp" />
-        <label for="image" class="file-label">选择文件</label>
-        <span id="imageName" class="muted">未选择文件</span>
+  <div class="input-mode-wrap">
+    <div class="input-mode-tabs" role="tablist">
+      <button type="button" class="tab active" role="tab" id="tab-text" aria-selected="true">文字题目</button>
+      <button type="button" class="tab" role="tab" id="tab-image" aria-selected="false">上传图片</button>
+    </div>
+    <div id="panel-text" class="input-panel active" role="tabpanel">
+      <div class="input-panel-inner">
+        <label for="problem">题目内容</label>
+        <textarea id="problem" placeholder="例如：求方程 x² = 1 的解"></textarea>
+        <button id="submit" class="btn btn-primary">生成动画</button>
       </div>
     </div>
-    <button id="submit" class="btn btn-primary">生成动画</button>
+    <div id="panel-image" class="input-panel" role="tabpanel">
+      <div class="input-panel-inner">
+        <label for="image">选择题目图片</label>
+        <div class="file-upload-wrap">
+          <input type="file" id="image" accept="image/jpeg,image/png,image/gif,image/webp" />
+          <label for="image" class="file-label">选择文件</label>
+          <span id="imageName" class="muted">未选择文件</span>
+        </div>
+        <button id="submit-image" class="btn btn-primary">生成动画</button>
+      </div>
+    </div>
   </div>
 
   <div id="progress-card" aria-live="polite">
@@ -289,6 +334,23 @@
     var imageEl = document.getElementById('image');
     var imageNameEl = document.getElementById('imageName');
     var submitBtn = document.getElementById('submit');
+    var submitImageBtn = document.getElementById('submit-image');
+    var tabText = document.getElementById('tab-text');
+    var tabImage = document.getElementById('tab-image');
+    var panelText = document.getElementById('panel-text');
+    var panelImage = document.getElementById('panel-image');
+
+    function setInputMode(mode) {
+      var isText = mode === 'text';
+      tabText.classList.toggle('active', isText);
+      tabImage.classList.toggle('active', !isText);
+      tabText.setAttribute('aria-selected', isText);
+      tabImage.setAttribute('aria-selected', !isText);
+      panelText.classList.toggle('active', isText);
+      panelImage.classList.toggle('active', !isText);
+    }
+    tabText.addEventListener('click', function() { setInputMode('text'); });
+    tabImage.addEventListener('click', function() { setInputMode('image'); });
     var progressCardEl = document.getElementById('progress-card');
     var statusEl = document.getElementById('status');
     var progressBarEl = document.getElementById('progress-bar');
@@ -429,7 +491,7 @@
                 .then(function() {
                   showStatus('已提交断点重试…', 'running');
                   showProgress(null);
-                  submitBtn.disabled = true;
+                  submitBtn.disabled = true; submitImageBtn.disabled = true;
                   pollTask(taskId, function() { loadHistory(); });
                 })
                 .catch(function(err) {
@@ -499,43 +561,34 @@
               hideProgress();
               var resultUrl = data.result_url || ('/results/' + taskId + '.html');
               showResult(resultUrl);
-              submitBtn.disabled = false;
+              submitBtn.disabled = false; submitImageBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
               return;
             }
             if (data.status === 'failed') {
               showStatus('生成失败：' + (data.error || '未知错误'), 'failed', taskId);
               hideProgress();
-              submitBtn.disabled = false;
+              submitBtn.disabled = false; submitImageBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
             }
           })
           .catch(function(err) {
             showStatus('请求失败：' + err.message, 'failed');
-            submitBtn.disabled = false;
+            submitBtn.disabled = false; submitImageBtn.disabled = false;
             if (typeof onDone === 'function') onDone();
           });
       }
       check();
     }
 
-    submitBtn.addEventListener('click', function() {
-      var problem = (problemEl.value || '').trim();
-      var imageFile = imageEl.files && imageEl.files[0];
-      if (!problem && !imageFile) {
-        showStatus('请输入题目或上传题目图片', 'failed');
-        return;
-      }
-      submitBtn.disabled = true;
+    function doSubmit(formData) {
+      submitBtn.disabled = true; submitImageBtn.disabled = true;
       playerEl.style.display = 'none';
-      showStatus(imageFile ? '正在识别图片并提交…' : '提交中…', 'running');
+      var hasImage = formData.has('image');
+      showStatus(hasImage ? '正在识别图片并提交…' : '提交中…', 'running');
       showProgress(null);
 
-      var form = new FormData();
-      if (problem) form.append('problem', problem);
-      if (imageFile) form.append('image', imageFile);
-
-      fetch('/api/generate_video', { method: 'POST', body: form })
+      fetch('/api/generate_video', { method: 'POST', body: formData })
         .then(function(r) {
           if (!r.ok) return r.json().then(function(j) { return Promise.reject(new Error(j.detail || r.statusText)); });
           return r.json();
@@ -546,13 +599,35 @@
             pollTask(data.task_id, function() { loadHistory(); });
           } else {
             showStatus('提交失败', 'failed');
-            submitBtn.disabled = false;
+            submitBtn.disabled = false; submitImageBtn.disabled = false;
           }
         })
         .catch(function(err) {
           showStatus('提交失败：' + (err.message || err), 'failed');
-          submitBtn.disabled = false;
+          submitBtn.disabled = false; submitImageBtn.disabled = false;
         });
+    }
+
+    submitBtn.addEventListener('click', function() {
+      var problem = (problemEl.value || '').trim();
+      if (!problem) {
+        showStatus('请输入题目内容', 'failed');
+        return;
+      }
+      var form = new FormData();
+      form.append('problem', problem);
+      doSubmit(form);
+    });
+
+    submitImageBtn.addEventListener('click', function() {
+      var imageFile = imageEl.files && imageEl.files[0];
+      if (!imageFile) {
+        showStatus('请先选择题目图片', 'failed');
+        return;
+      }
+      var form = new FormData();
+      form.append('image', imageFile);
+      doSubmit(form);
     });
 
     btnRetryCurrentEl.addEventListener('click', function() {
@@ -565,7 +640,7 @@
           showStatus('已提交断点重试…', 'running');
           showProgress(null);
           statusActionsEl.style.display = 'none';
-          submitBtn.disabled = true;
+          submitBtn.disabled = true; submitImageBtn.disabled = true;
           pollTask(taskId, function() { loadHistory(); });
         })
         .catch(function(err) {
