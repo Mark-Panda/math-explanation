@@ -26,22 +26,38 @@ git rev-parse --verify refs/heads/<目标分支>
 - **若命令失败（退出码非 0）**：提示「指定分支不存在」，不继续。可建议用户先拉取远程：`git fetch origin`，或确认分支名是否正确。
 - **若成功**：继续下一步。
 
-### 2. 记录当前分支并执行合并
+### 2. 记录当前分支并切换到目标分支
 
 ```bash
 CURRENT=$(git branch --show-current)
 git checkout <目标分支>
+```
+
+### 3. 拉取目标分支最新代码
+
+在合并前拉取远程该分支的最新提交：
+
+```bash
+git pull origin <目标分支>
+```
+
+- **若 `git pull` 失败**：提示「拉取 origin/&lt;目标分支&gt; 失败」，建议检查网络或远程分支后重试。
+- **若成功**：继续下一步。
+
+### 4. 执行合并
+
+```bash
 git merge "$CURRENT"
 ```
 
-### 3. 检查是否有冲突
+### 5. 检查是否有冲突
 
 合并后检查：
 
 - **若 `git merge` 已因冲突退出（退出码非 0）**：视为存在冲突，仅提示「存在合并冲突，请解决冲突后完成合并」（不执行 `git merge --abort`，保留当前合并状态供用户解决）。
 - **若 `git merge` 成功**：继续下一步。
 
-### 4. 推送到远程
+### 6. 推送到远程
 
 合并成功后执行：
 
@@ -52,7 +68,7 @@ git push origin <目标分支>
 - **若 `git push` 失败**：提示「合并成功，但推送到 origin/&lt;目标分支&gt; 失败」，建议用户检查网络或权限后手动执行 `git push origin <目标分支>`。
 - **若成功**：可提示「已成功将当前分支合并到指定分支并推送到 origin」。
 
-### 5. 可选：合并后回到原分支
+### 7. 可选：合并后回到原分支
 
 若希望用户继续在原分支工作，可执行：
 
@@ -70,7 +86,7 @@ git checkout "$CURRENT"
 .cursor/skills/merge-current-to-branch/scripts/merge-to-branch.sh <目标分支>
 ```
 
-- 脚本会依次：检查目标分支存在 → 合并 → 有冲突则仅提示，不执行 `git merge --abort`；合并成功后执行 `git push origin <目标分支>`。
+- 脚本会依次：检查目标分支存在 → 切换到目标分支 → 拉取目标分支最新代码（`git pull origin <目标分支>`）→ 合并 → 有冲突则仅提示，不执行 `git merge --abort`；合并成功后执行 `git push origin <目标分支>`。
 - 执行脚本时从仓库根目录运行；脚本需有执行权限（`chmod +x`）。
 
 ## 提示文案

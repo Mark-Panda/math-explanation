@@ -23,16 +23,22 @@ if [ -z "$CURRENT" ]; then
   exit 1
 fi
 
-# 2. 切换到目标分支并合并
+# 2. 切换到目标分支
 git checkout "$TARGET"
 
-# 3. 合并；有冲突时 merge 会失败，仅提示，不执行 git merge --abort
+# 3. 拉取目标分支最新代码
+if ! git pull origin "$TARGET"; then
+  echo "拉取 origin/$TARGET 失败。请检查网络或远程分支后重试。"
+  exit 1
+fi
+
+# 4. 合并；有冲突时 merge 会失败，仅提示，不执行 git merge --abort
 if ! git merge "$CURRENT"; then
   echo "合并时存在冲突。请解决冲突后完成合并。"
   exit 1
 fi
 
-# 4. 推送到远程
+# 5. 推送到远程
 if ! git push origin "$TARGET"; then
   echo "合并成功，但推送到 origin/$TARGET 失败。请检查网络或权限后手动执行: git push origin $TARGET"
   exit 1
