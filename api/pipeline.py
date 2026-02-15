@@ -34,6 +34,7 @@ def run_pipeline(
     image_mime_type: str = "image/jpeg",
     on_step_start: Callable[[int, str], None] | None = None,
     force_restart: bool = False,
+    animation_style: str | None = None,
 ) -> Path:
     """
     依次执行：题目分析 → 脚本生成 → TTS 与时长收集 → 时长注入+HTML 渲染。
@@ -45,6 +46,7 @@ def run_pipeline(
     :param image_mime_type: 图片 MIME 类型
     :param on_step_start: 进度回调 on_step_start(step_index, step_name)
     :param force_restart: 为 True 时忽略已有检查点，从头执行
+    :param animation_style: 可选，动画风格描述，注入脚本生成 prompt；为 None 时使用 config
     :return: 最终 HTML 动画文件路径。任一步失败则向上抛出异常。
     """
     output_dir = Path(output_dir)
@@ -99,6 +101,7 @@ def run_pipeline(
             steps,
             image_base64=image_base64,
             image_mime_type=image_mime_type,
+            animation_style=animation_style,
         )
         animation_html = script_out.animation_html
         logger.info("[pipeline] 脚本生成完成 animation_html 长度=%d", len(animation_html))

@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # 默认 wait 时长（秒），用于时长不足时的兜底
     default_wait_seconds: float = 2.0
 
+    # 动画风格（可选）：注入到脚本生成阶段的 prompt，要求大模型按此风格生成。为空则不追加要求。
+    # 示例："教科书风格、极简、白底；动画以淡入和滑入为主，避免花哨效果"
+    animation_style: str = ""
+
 
 def get_settings() -> Settings:
     return Settings()

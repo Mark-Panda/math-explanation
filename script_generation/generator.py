@@ -36,7 +36,8 @@ PLAN_PROMPT = """你是数学动画设计师。基于以下解题步骤，为每
 - 公式用 Unicode 数学符号（x²、√、∑、π 等），不用 MathJax/KaTeX
 - 动画效果用纯 CSS（fadeIn、slideIn 等），不用外部库
 - 几何图形用 SVG 绘制
-- step_plans 数量必须与输入步骤数一致"""
+- step_plans 数量必须与输入步骤数一致
+{animation_style_instruction}"""
 
 PLAN_PROMPT_WITH_IMAGE = """你是数学动画设计师。基于以下解题步骤和附带的原始题目图片，为每一步设计网页动画方案。
 
@@ -55,7 +56,8 @@ PLAN_PROMPT_WITH_IMAGE = """你是数学动画设计师。基于以下解题步�
 - 公式用 Unicode 数学符号，不用 MathJax/KaTeX
 - 动画效果用纯 CSS，不用外部库
 - 几何图形用 SVG，准确还原原图
-- step_plans 数量与步骤数一致"""
+- step_plans 数量与步骤数一致
+{animation_style_instruction}"""
 
 # ==================== 阶段 B：逐步生成代码 ====================
 
@@ -85,7 +87,8 @@ STEP_CODE_PROMPT = """你是前端动画工程师。请为以下数学讲解步�
 - 几何图形操作已有的 SVG 底图（如改变颜色、添加标注等）
 - **不要**使用 window、document.body、alert 等全局操作
 - **不要**使用任何外部库
-- 只输出函数体代码，不要 function 声明"""
+- 只输出函数体代码，不要 function 声明
+{animation_style_instruction}"""
 
 
 def _steps_to_dict_list(steps: list[StepItem]) -> list[dict]:
@@ -101,18 +104,27 @@ def _steps_to_dict_list(steps: list[StepItem]) -> list[dict]:
     ]
 
 
+def _style_instruction(animation_style: str | None) -> str:
+    """若配置了动画风格，返回追加到 prompt 的「动画风格要求」句段，否则返回空串。"""
+    if not animation_style or not animation_style.strip():
+        return ""
+    return "\n**动画风格要求**：" + animation_style.strip()
+
+
 def _generate_plan(
     steps: list[StepItem],
     *,
     image_base64: str | None = None,
     image_mime_type: str = "image/jpeg",
+    animation_style: str | None = None,
 ) -> AnimationPlanOutput:
     """阶段 A：生成动画方案（轻量请求）。"""
     steps_json = json.dumps(_steps_to_dict_list(steps), ensure_ascii=False, indent=2)
     timeout = get_settings().llm_request_timeout  # 用普通请求超时，不需要脚本超时
+    style_instruction = _style_instruction(animation_style)
 
     if image_base64:
-        prompt = PLAN_PROMPT_WITH_IMAGE.format(steps_json=steps_json)
+        prompt = PLAN_PROMPT_WITH_IMAGE.format(steps_json=steps_json, animation_style_instruction=style_instruction)
         return invoke_multimodal_structured(
             prompt,
             AnimationPlanOutput,
@@ -121,7 +133,7 @@ def _generate_plan(
             timeout=timeout,
         )
     else:
-        prompt = PLAN_PROMPT.format(steps_json=steps_json)
+        prompt = PLAN_PROMPT.format(steps_json=steps_json, animation_style_instruction=style_instruction)
         return invoke_structured(prompt, AnimationPlanOutput, timeout=timeout)
 
 
@@ -130,10 +142,13 @@ def _generate_step_code(
     plan: AnimationPlanOutput,
     step_plan_desc: str,
     prev_steps_info: str,
+    *,
+    animation_style: str | None = None,
 ) -> str:
     """阶段 B：生成单步的 animate 函数体。"""
     css_summary = f'已定义样式: {plan.shared_css[:200]}...' if len(plan.shared_css) > 200 else (plan.shared_css or "无")
     svg_summary = "有 SVG 底图" if plan.shared_svg else "无 SVG 底图"
+    style_instruction = _style_instruction(animation_style)
 
     prompt = STEP_CODE_PROMPT.format(
         shared_css_summary=css_summary,
@@ -145,6 +160,7 @@ def _generate_step_code(
         visual_focus=step.visual_focus,
         voiceover_text=step.voiceover_text,
         animation_description=step_plan_desc,
+        animation_style_instruction=style_instruction,
     )
     result: StepCodeOutput = invoke_structured(
         prompt,
@@ -209,12 +225,15 @@ def generate_animation_html_and_prompts(
     *,
     image_base64: str | None = None,
     image_mime_type: str = "image/jpeg",
+    animation_style: str | None = None,
 ) -> ScriptGenerationOutput:
     """
     两阶段生成网页动画代码：
     1. 阶段 A：生成动画方案（含图片时走多模态，单次轻量请求）
     2. 阶段 B：逐步生成每步 JS 代码（每步一次小请求，纯文本）
     3. 拼装为完整 HTML 片段
+
+    animation_style: 可选。若提供，会注入到方案与代码生成的 prompt 中，要求大模型按该风格生成；为 None 时使用 config.animation_style。
     """
     if not steps:
         raise ValueError("steps 不能为空")
@@ -225,10 +244,11 @@ def generate_animation_html_and_prompts(
             raise ValueError(f"steps[{i}] 缺少 description 或 voiceover_text")
 
     n = len(steps)
+    style = (animation_style if animation_style is not None else get_settings().animation_style) or ""
 
     # ---------- 阶段 A：动画方案 ----------
-    logger.info("[script_gen] 阶段A: 生成动画方案，步骤数=%d，有图片=%s", n, bool(image_base64))
-    plan = _generate_plan(steps, image_base64=image_base64, image_mime_type=image_mime_type)
+    logger.info("[script_gen] 阶段A: 生成动画方案，步骤数=%d，有图片=%s，风格=%s", n, bool(image_base64), bool(style))
+    plan = _generate_plan(steps, image_base64=image_base64, image_mime_type=image_mime_type, animation_style=style or None)
 
     # 校验 step_plans 数量
     if len(plan.step_plans) < n:
@@ -262,6 +282,7 @@ def generate_animation_html_and_prompts(
             plan,
             plan.step_plans[i].animation_description,
             prev_info,
+            animation_style=style or None,
         )
         step_codes.append(code)
         logger.info("[script_gen] 步骤 %d 代码长度=%d", i + 1, len(code))

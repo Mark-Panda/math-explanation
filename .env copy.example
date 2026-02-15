@@ -44,9 +44,18 @@ VISION_REQUEST_TIMEOUT=300
 # ========== TTS ==========
 TTS_VOICE=zh-CN-XiaoxiaoNeural
 
-# ========== 自愈与时长 ==========
+# ========== 自愈、时长与动画风格 ==========
 HTML_SELF_HEAL_MAX_ATTEMPTS=3
 DEFAULT_WAIT_SECONDS=2.0
+
+# 动画风格（可选）：注入到脚本生成 prompt，要求大模型按此风格生成。只保留一行生效，其余注释掉。
+# 儿童插画风（圆润、柔和色彩、可爱）：
+ANIMATION_STYLE=儿童插画风：圆润线条、柔和配色（如浅粉、天蓝、薄荷绿）、可爱简笔画感；动画以淡入和轻柔滑入为主，避免复杂特效
+# 手绘简笔风（线条感、像手画草图）：
+# ANIMATION_STYLE=手绘简笔风：线条略粗、有手绘抖动感，像铅笔或马克笔草图；配色简洁（黑线+少量色块或留白）；动画以淡入、简单位移为主，保持简笔画气质
+# 教科书极简风：
+# ANIMATION_STYLE=教科书风格、极简、白底；动画以淡入和滑入为主
+# 不设则留空：ANIMATION_STYLE=
 
 # 脚本生成阶段超时（单位：秒，填 300 表示 5 分钟；504 需在 ops-ai-gateway 或前置 Nginx 调大 proxy_read_timeout）
 LLM_SCRIPT_TIMEOUT=300

@@ -78,6 +78,7 @@ def _run_pipeline_task(
     problem_text: str | None,
     image_bytes: bytes | None = None,
     image_mime_type: str = "image/jpeg",
+    animation_style: str | None = None,
 ) -> None:
     """后台执行：若有图片则先识别题目 → 公式验证 → 带原图跑流水线。"""
     output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
@@ -132,13 +133,14 @@ def _run_pipeline_task(
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
-        # ---------- 执行流水线（传入原图 base64） ----------
+        # ---------- 执行流水线（传入原图 base64、可选动画风格） ----------
         result_path = run_pipeline(
             problem_text.strip(),
             output_dir,
             image_base64=img_b64,
             image_mime_type=image_mime_type,
             on_step_start=on_step_start,
+            animation_style=animation_style,
         )
         dest = RESULTS_DIR / f"{task_id}.html"
         import shutil
@@ -159,6 +161,7 @@ async def generate_video(
     background_tasks: BackgroundTasks,
     problem: str | None = Form(None, description="题目文本，与图片二选一或同时提供（有图片时以识别结果为准）"),
     image: UploadFile | None = File(None, description="题目图片，将使用视觉模型识别题目文字"),
+    animation_style: str | None = Form(None, description="可选，动画风格描述，会注入到生成 prompt 中；不填则使用环境变量 ANIMATION_STYLE"),
 ):
     """支持 multipart：仅文本、仅图片、或文本+图片。图片识别在后台执行，请求立即返回 task_id，避免 nginx 等代理超时。"""
     problem_text: str | None = _normalize_problem(problem)
@@ -183,7 +186,8 @@ async def generate_video(
     problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
     task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
     logger.info("[generate] 收到请求 task_id=%s 有文字=%s 有图片=%s", task_id, bool(problem_text), bool(image_bytes))
-    background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type)
+    style = (animation_style or "").strip() or None
+    background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type, style)
     return GenerateVideoResponse(task_id=task_id, status="pending")
 
 
@@ -268,5 +272,5 @@ async def regenerate(background_tasks: BackgroundTasks, body: RegenerateRequest)
         )
     problem_preview = (problem_text or "")[:120]
     new_task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
-    background_tasks.add_task(_run_pipeline_task, new_task_id, problem_text, None, "image/jpeg")
+    background_tasks.add_task(_run_pipeline_task, new_task_id, problem_text, None, "image/jpeg", None)
     return RegenerateResponse(task_id=new_task_id, status="pending")
