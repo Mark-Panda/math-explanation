@@ -39,9 +39,20 @@ git merge "$CURRENT"
 合并后检查：
 
 - **若 `git merge` 已因冲突退出（退出码非 0）**：视为存在冲突，仅提示「存在合并冲突，请解决冲突后完成合并」（不执行 `git merge --abort`，保留当前合并状态供用户解决）。
-- **若 `git merge` 成功**：合并完成，可提示「已成功将当前分支合并到指定分支」。
+- **若 `git merge` 成功**：继续下一步。
 
-### 4. 可选：合并后回到原分支
+### 4. 推送到远程
+
+合并成功后执行：
+
+```bash
+git push origin <目标分支>
+```
+
+- **若 `git push` 失败**：提示「合并成功，但推送到 origin/&lt;目标分支&gt; 失败」，建议用户检查网络或权限后手动执行 `git push origin <目标分支>`。
+- **若成功**：可提示「已成功将当前分支合并到指定分支并推送到 origin」。
+
+### 5. 可选：合并后回到原分支
 
 若希望用户继续在原分支工作，可执行：
 
@@ -59,7 +70,7 @@ git checkout "$CURRENT"
 .cursor/skills/merge-current-to-branch/scripts/merge-to-branch.sh <目标分支>
 ```
 
-- 脚本会依次：检查目标分支存在 → 合并 → 有冲突则仅提示，不执行 `git merge --abort`。
+- 脚本会依次：检查目标分支存在 → 合并 → 有冲突则仅提示，不执行 `git merge --abort`；合并成功后执行 `git push origin <目标分支>`。
 - 执行脚本时从仓库根目录运行；脚本需有执行权限（`chmod +x`）。
 
 ## 提示文案

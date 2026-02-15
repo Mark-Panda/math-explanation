@@ -32,4 +32,10 @@ if ! git merge "$CURRENT"; then
   exit 1
 fi
 
-echo "已成功将分支 \"$CURRENT\" 合并到 \"$TARGET\"。"
+# 4. 推送到远程
+if ! git push origin "$TARGET"; then
+  echo "合并成功，但推送到 origin/$TARGET 失败。请检查网络或权限后手动执行: git push origin $TARGET"
+  exit 1
+fi
+
+echo "已成功将分支 \"$CURRENT\" 合并到 \"$TARGET\" 并推送到 origin。"
