@@ -54,3 +54,4 @@ data/
 # 调试与本地
 *.local
 .cache/
+.cursor/
