@@ -150,10 +150,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     var totalStepsEl = document.getElementById('total-steps');
     var progressFill = document.getElementById('progress-fill');
     var container = document.getElementById('animation-container');
+    var initialAnimationContent = container ? container.innerHTML : '';
 
-    totalStepsEl.textContent = totalSteps;
+    if (totalSteps === 0) {{
+      stepInfo.textContent = '未检测到讲解步骤，请在新标签页打开或重新生成';
+      stepInfo.title = '若仍无效，可能是生成时脚本被截断，请重新提交题目生成';
+      if (playBtn) playBtn.disabled = true;
+    }} else {{
+      totalStepsEl.textContent = totalSteps;
+    }}
 
     function updateUI() {{
+      if (totalSteps === 0) return;
       if (currentStep >= totalSteps) {{
         stepInfo.innerHTML = '✓ 已完成 ' + totalSteps + ' 步';
         stepInfo.classList.add('done');
@@ -207,9 +215,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     playBtn.addEventListener('click', function() {{
       if (currentStep >= totalSteps) {{
-        // 重头播放
         currentStep = 0;
-        if (container) container.innerHTML = '';
+        if (container && initialAnimationContent) container.innerHTML = initialAnimationContent;
       }}
       playStep(currentStep);
     }});
@@ -217,7 +224,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     resetBtn.addEventListener('click', function() {{
       playing = false;
       currentStep = 0;
-      if (container) container.innerHTML = '';
+      if (container && initialAnimationContent) container.innerHTML = initialAnimationContent;
       // 暂停所有音频
       for (var i = 0; i < totalSteps; i++) {{
         var audio = document.getElementById('audio-step-' + i);
@@ -231,7 +238,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       updateUI();
     }});
 
-    updateUI();
+    if (totalSteps > 0) updateUI();
   }})();
   </script>
 </body>

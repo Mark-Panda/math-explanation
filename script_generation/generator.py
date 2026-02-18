@@ -36,6 +36,7 @@ PLAN_PROMPT = """你是数学动画设计师。基于以下解题步骤，为每
 - 公式用 Unicode 数学符号（x²、√、∑、π 等），不用 MathJax/KaTeX
 - 动画效果用纯 CSS（fadeIn、slideIn 等），不用外部库
 - 几何图形用 SVG 绘制
+- 若有步骤需要「画辅助线」（如垂线、角平分线等），在 shared_svg 中必须预画该辅助线并设唯一 id（如 id=\"de-line\"）、初始 opacity:0 或 class 隐藏，便于步骤代码通过 querySelector 找到并做显示动画；不要依赖步骤代码从零创建线段导致不一致
 - step_plans 数量必须与输入步骤数一致
 {animation_style_instruction}"""
 
@@ -44,18 +45,25 @@ PLAN_PROMPT_WITH_IMAGE = """你是数学动画设计师。基于以下解题步�
 解题步骤:
 {steps_json}
 
-请仔细观察图片中的图形、公式和标注，设计动画时要准确还原。
+请仔细观察附带的原始题目图片，设计动画时要准确还原。
+
+**shared_svg 必须与原图一致（重要）**：
+- 连线关系：只画原图中实际存在的线段，谁连谁必须与原图一致。**四边形 ABCD 必须包含五条线：边 AB、边 BC、边 CD、边 DA，以及对角线 BD**（题目若画了 BD）。每条对应一个 <path> 或 <line>，**不可遗漏任何一条**；尤其 BC 是顶点 B 与 C 的连线（常为底边），必须单独画出，不得与其它边合并或省略。
+- 顶点与标注：字母 A、B、C、D 等的位置和相对关系要与原图一致（如原图 A 在左上则 SVG 中 A 也在左上，不要与其它顶点对调）
+- 形状与比例：图形的大致形状、夹角、哪边更长要与原图一致，不要画成随意示意图；使用 viewBox=\"0 0 800 600\"，在 800×600 范围内按原图估计各点坐标
+- 若原图中有辅助线（如垂线 DE），在 shared_svg 中预画并设 id、初始隐藏；若原图没有的线不要预先画成实线
+- 为便于步骤动画引用，给关键线段设 id：如 id=\"bc-line\"（BC 边）、id=\"ad-line\"（AD 边）、id=\"bd-line\"（对角线 BD）等，便于后续步骤高亮或标注
 
 请输出：
 1. shared_css: 所有步骤共享的 CSS 样式
-2. shared_svg: 如果题目涉及几何图形，输出 SVG 底图（准确还原图片中的图形、顶点标注、角度等）；否则留空 ""
+2. shared_svg: 如果题目涉及几何图形，输出 SVG 底图（按上述要求与原图一致）；否则留空 ""
 3. step_plans: 每步的动画方案，包含 step_id、animation_description、image_prompt
 
 要求：
 - 动画容器 800×600px，白色背景
 - 公式用 Unicode 数学符号，不用 MathJax/KaTeX
 - 动画效果用纯 CSS，不用外部库
-- 几何图形用 SVG，准确还原原图
+- 若有步骤需要「画辅助线」（如垂线 DE、角平分线等），在 shared_svg 中必须预画该辅助线并设唯一 id（如 id=\"de-line\"）、初始 opacity:0 或 class 隐藏，便于步骤代码找到并做显示动画
 - step_plans 数量与步骤数一致
 {animation_style_instruction}"""
 
@@ -79,13 +87,14 @@ STEP_CODE_PROMPT = """你是前端动画工程师。请为以下数学讲解步�
 请输出 `animate_body`：即 `function(container) {{ ... }}` 的函数体 JavaScript 代码。
 
 要求：
-- 代码通过 `container` 参数（即 animation-container 元素）操作 DOM
-- 使用 innerHTML 追加或 createElement 创建元素
+- 代码通过 `container` 参数（即 animation-container 元素）操作 DOM；获取 SVG 用 container.querySelector('svg')，获取底图内元素用 container.querySelector('#id')，不要用 document.getElementById 或 svg.getElementById
+- 使用 innerHTML 追加或 createElement/createElementNS 创建元素
 - 可以使用已有的共享 CSS class
 - 动画用 CSS animation 或 transition，元素添加后自动播放
 - 公式用 Unicode 数学符号，不用 MathJax/KaTeX
 - 几何图形操作已有的 SVG 底图（如改变颜色、添加标注等）
-- **不要**使用 window、document.body、alert 等全局操作
+- **不要**使用 window、document.body、alert、playVoice 等全局或未定义函数；**不要**在代码里播放音频，旁白由系统按步自动播放，本代码只负责画面与公式
+- 若本步要「显示辅助线」：底图中已有带 id 的辅助线（如 #de-line）时，用 container.querySelector('#de-line') 获取后设置 style.opacity 或 class 使其可见并做绘制/高亮动画；若需创建新线段再用 createElementNS('http://www.w3.org/2000/svg', 'line') 或 path 并 append 到 container.querySelector('svg')
 - **不要**使用任何外部库
 - 只输出函数体代码，不要 function 声明
 {animation_style_instruction}"""
@@ -186,6 +195,10 @@ def _assemble_html(
         svg_block = plan.shared_svg
 
     # 构建 stepAnimations 数组
+    def _escape_script_close(raw: str) -> str:
+        """防止步骤代码中的 </script> 在 HTML 中提前结束脚本块，导致 stepAnimations 未定义、页面显示 0 步。"""
+        return raw.replace("</script>", "<\\/script>").replace("</SCRIPT>", "<\\/SCRIPT>")
+
     steps_js_items = []
     for i, code in enumerate(step_codes):
         # 清理可能的 markdown 代码块包裹
@@ -196,6 +209,7 @@ def _assemble_html(
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             clean_code = "\n".join(lines)
+        clean_code = _escape_script_close(clean_code)
 
         steps_js_items.append(
             f"  {{\n"

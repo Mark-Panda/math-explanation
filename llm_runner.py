@@ -71,6 +71,21 @@ def _extract_json_from_text(text: str) -> str:
     return text
 
 
+def _repair_json_invalid_escapes(text: str) -> str:
+    """
+    修复 JSON 中非法反斜杠转义，使 model_validate_json 能通过。
+
+    LLM 常在字符串里输出 LaTeX（如 \\angle、\\circ），JSON 只允许 \\ \" \\/ \\b \\f \\n \\r \\t \\uXXXX。
+    将「非合法转义」的反斜杠改为双反斜杠，例如 "\\angle" -> "\\\\angle"。
+    """
+    # 匹配：反斜杠 且 后面不是合法 JSON 转义（" \ / b f n r t 或 u+4位十六进制）
+    return re.sub(
+        r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})',
+        r'\\\\',
+        text,
+    )
+
+
 def _strip_any_code_block(text: str) -> str:
     """去掉 Markdown 代码块围栏（如 ```javascript 或 ```），返回块内内容。"""
     s = text.strip()
@@ -120,6 +135,14 @@ def _invoke_and_parse(
     try:
         return schema.model_validate_json(extracted)
     except Exception as e:
+        err_msg = str(e).lower()
+        if "invalid escape" in err_msg or "json_invalid" in err_msg:
+            repaired = _repair_json_invalid_escapes(extracted)
+            logger.info("[LLM] 修复 JSON 非法转义后重试解析")
+            try:
+                return schema.model_validate_json(repaired)
+            except Exception:
+                pass
         # 部分模型对 StepCodeOutput 只返回代码块而非 JSON，将提取内容视为 animate_body
         if schema.__name__ == "StepCodeOutput" and extracted and extracted.strip():
             code = _strip_any_code_block(extracted)
