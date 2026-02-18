@@ -99,6 +99,62 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       min-width: 7em;
     }}
     #step-info.done {{ color: #3fb950; font-weight: 500; }}
+    .step-strip {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }}
+    .step-strip .step-dot {{
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.08);
+      color: #8b949e;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }}
+    .step-strip .step-dot:hover {{
+      background: rgba(255,255,255,0.15);
+      color: #c9d1d9;
+      border-color: rgba(255,255,255,0.35);
+    }}
+    .step-strip .step-dot.active {{
+      background: linear-gradient(180deg, #58a6ff, #388bfd);
+      border-color: #58a6ff;
+      color: #fff;
+    }}
+    .step-strip .step-dot.done {{
+      background: rgba(63,185,80,0.25);
+      border-color: #3fb950;
+      color: #3fb950;
+    }}
+    #btn-prev, #btn-next {{
+      background: rgba(255,255,255,0.12);
+      color: #c9d1d9;
+      border: 1px solid rgba(255,255,255,0.18);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.2s, color 0.2s;
+    }}
+    #btn-prev:hover:not(:disabled), #btn-next:hover:not(:disabled) {{
+      background: rgba(255,255,255,0.18);
+      color: #e6e6e6;
+    }}
+    #btn-prev:disabled, #btn-next:disabled {{
+      opacity: 0.4;
+      cursor: not-allowed;
+    }}
     #animation-wrapper {{
       background: #f0f2f5;
       min-height: 420px;
@@ -118,12 +174,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="player-header">
       <div class="progress-wrap"><div id="progress-fill"></div></div>
       <div id="controls">
+        <button id="btn-prev" title="上一步">◀ 上一步</button>
         <button id="btn-play">▶ 播放</button>
+        <button id="btn-next" title="下一步">下一步 ▶</button>
         <button id="btn-reset">重置</button>
         <span id="step-info">共 <span id="total-steps">0</span> 步</span>
       </div>
     </div>
     <div id="animation-wrapper">
+      <div id="step-strip" class="step-strip" aria-label="步骤导航"></div>
       {animation_html}
     </div>
   </div>
@@ -146,14 +205,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     var playing = false;
     var playBtn = document.getElementById('btn-play');
     var resetBtn = document.getElementById('btn-reset');
+    var prevBtn = document.getElementById('btn-prev');
+    var nextBtn = document.getElementById('btn-next');
     var stepInfo = document.getElementById('step-info');
     var totalStepsEl = document.getElementById('total-steps');
     var progressFill = document.getElementById('progress-fill');
     var container = document.getElementById('animation-container');
+    var stepStrip = document.getElementById('step-strip');
 
     totalStepsEl.textContent = totalSteps;
 
+    function updateStepDots() {{
+      if (!stepStrip) return;
+      stepStrip.innerHTML = '';
+      for (var i = 0; i < totalSteps; i++) {{
+        var dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = 'step-dot' + (i === currentStep ? ' active' : '') + (i < currentStep ? ' done' : '');
+        dot.textContent = i + 1;
+        dot.setAttribute('aria-label', '步骤 ' + (i + 1));
+        (function(idx) {{ dot.addEventListener('click', function() {{ goToStep(idx); }}); }})(i);
+        stepStrip.appendChild(dot);
+      }}
+    }}
+
     function updateUI() {{
+      if (prevBtn) prevBtn.disabled = (currentStep <= 0);
+      if (nextBtn) nextBtn.disabled = (currentStep >= totalSteps);
       if (currentStep >= totalSteps) {{
         stepInfo.innerHTML = '✓ 已完成 ' + totalSteps + ' 步';
         stepInfo.classList.add('done');
@@ -166,6 +244,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         stepInfo.classList.remove('done');
         progressFill.style.width = ((currentStep / totalSteps) * 100) + '%';
       }}
+      updateStepDots();
+    }}
+
+    function goToStep(index) {{
+      playing = false;
+      playBtn.textContent = '▶ 播放';
+      playBtn.disabled = false;
+      if (index < 0) index = 0;
+      if (index >= totalSteps) index = totalSteps;
+      currentStep = index;
+      if (container) container.innerHTML = '';
+      for (var i = 0; i < totalSteps; i++) {{
+        var a = document.getElementById('audio-step-' + i);
+        if (a) {{ a.pause(); a.currentTime = 0; }}
+      }}
+      if (index < totalSteps) {{
+        try {{ steps[index].animate(container); }} catch(e) {{ console.error('步骤 ' + (index + 1) + ' 动画执行出错:', e); }}
+        var a = document.getElementById('audio-step-' + index);
+        if (a) a.play().catch(function() {{}});
+      }}
+      updateUI();
     }}
 
     function playStep(index) {{
@@ -205,9 +304,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       }}, dur * 1000);
     }}
 
+    if (prevBtn) prevBtn.addEventListener('click', function() {{ goToStep(currentStep - 1); }});
+    if (nextBtn) nextBtn.addEventListener('click', function() {{ goToStep(currentStep + 1); }});
+
     playBtn.addEventListener('click', function() {{
       if (currentStep >= totalSteps) {{
-        // 重头播放
         currentStep = 0;
         if (container) container.innerHTML = '';
       }}
@@ -218,13 +319,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       playing = false;
       currentStep = 0;
       if (container) container.innerHTML = '';
-      // 暂停所有音频
       for (var i = 0; i < totalSteps; i++) {{
         var audio = document.getElementById('audio-step-' + i);
-        if (audio) {{
-          audio.pause();
-          audio.currentTime = 0;
-        }}
+        if (audio) {{ audio.pause(); audio.currentTime = 0; }}
       }}
       playBtn.textContent = '▶ 播放';
       playBtn.disabled = false;
