@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     remotion_node_command: str = "node"
     """用于执行 remotion/render.js 的 Node 可执行文件。"""
 
+    # Remotion 代码生成：是否用大模型根据 Remotion skill 生成 TSX（写入 work/MathExplanation.generated.tsx）
+    remotion_generate_code: bool = False
+    """为 True 时在脚本生成阶段后调用 LLM 生成 Remotion 组件代码，用于网页动画/MP4；需配合 remotion skill 规则。"""
+
 
 def get_settings() -> Settings:
     return Settings()

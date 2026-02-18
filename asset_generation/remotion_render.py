@@ -85,6 +85,7 @@ def render_remotion_video(
     audio_prefix: str = "step",
     node_command: str = "node",
     remotion_dir: Path | None = None,
+    generated_tsx_path: Path | None = None,
 ) -> None:
     """
     将 steps、时长与 audio_dir 下的 TTS 音频通过 Remotion 渲染为 MP4。
@@ -96,16 +97,25 @@ def render_remotion_video(
     :param audio_prefix: 音频文件名前缀，默认 "step"
     :param node_command: 用于执行 render.js 的 Node 可执行文件，默认 "node"
     :param remotion_dir: Remotion 项目目录，默认项目内 remotion/
+    :param generated_tsx_path: 若提供且文件存在，会复制到 remotion/src/MathExplanation.generated.tsx 并用 Composition MathExplanationGenerated 渲染
     :raises FileNotFoundError: remotion 目录或 Node 不存在
     :raises RuntimeError: 渲染失败
     """
-    remotion_dir = remotion_dir or REMOTION_DIR
+    remotion_dir = Path(remotion_dir) if remotion_dir else REMOTION_DIR
     if not remotion_dir.is_dir():
         raise FileNotFoundError(f"Remotion 项目目录不存在: {remotion_dir}")
 
     output_file = Path(output_file).resolve()
     output_file.parent.mkdir(parents=True, exist_ok=True)
     input_json_path = output_file.parent / "remotion-input.json"
+
+    # 若存在大模型生成的 Remotion 代码，复制到 remotion/src 并使用对应 Composition
+    composition_id = "MathExplanation"
+    if generated_tsx_path and Path(generated_tsx_path).is_file():
+        dest = remotion_dir / "src" / "MathExplanation.generated.tsx"
+        shutil.copy2(generated_tsx_path, dest)
+        composition_id = "MathExplanationGenerated"
+        logger.info("[remotion] 已使用生成的 TSX %s -> %s，Composition=%s", generated_tsx_path, dest, composition_id)
 
     # 写入 Remotion inputProps
     input_props = _remotion_input_from_pipeline(steps, durations, audio_prefix)
@@ -132,6 +142,7 @@ def render_remotion_video(
         str(render_script),
         "--input", str(input_json_path),
         "--output", str(output_file),
+        "--composition", composition_id,
     ]
     proc = subprocess.run(
         cmd,

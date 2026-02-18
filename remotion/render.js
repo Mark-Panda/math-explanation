@@ -17,12 +17,16 @@ async function main() {
   const args = process.argv.slice(2);
   const inputIdx = args.indexOf("--input");
   const outputIdx = args.indexOf("--output");
+  const compositionIdx = args.indexOf("--composition");
   if (inputIdx === -1 || !args[inputIdx + 1] || outputIdx === -1 || !args[outputIdx + 1]) {
-    console.error("Usage: node render.js --input <remotion-input.json> --output <output.mp4>");
+    console.error("Usage: node render.js --input <remotion-input.json> --output <output.mp4> [--composition <id>]");
     process.exit(1);
   }
   const inputPath = path.resolve(args[inputIdx + 1]);
   const outputPath = path.resolve(args[outputIdx + 1]);
+  const compositionId = compositionIdx >= 0 && args[compositionIdx + 1]
+    ? args[compositionIdx + 1]
+    : "MathExplanation";
 
   if (!fs.existsSync(inputPath)) {
     console.error("Input file not found:", inputPath);
@@ -37,10 +41,10 @@ async function main() {
     webpackOverride: (config) => config,
   });
 
-  console.log("[remotion] Selecting composition...");
+  console.log("[remotion] Selecting composition:", compositionId);
   const composition = await selectComposition({
     serveUrl: bundleLocation,
-    id: "MathExplanation",
+    id: compositionId,
     inputProps,
   });
 

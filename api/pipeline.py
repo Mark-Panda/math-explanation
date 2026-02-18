@@ -10,6 +10,7 @@ from asset_generation.timing import inject_timing_into_html
 from asset_generation.tts import generate_audios_for_steps
 from problem_analysis.analyzer import analyze_problem
 from script_generation.generator import generate_animation_html_and_prompts
+from script_generation.remotion_generator import generate_remotion_code
 
 from api.pipeline_checkpoint import (
     clear_checkpoint,
@@ -109,6 +110,20 @@ def run_pipeline(
         logger.info("[pipeline] 脚本生成完成 animation_html 长度=%d", len(animation_html))
         save_step_checkpoint(work, 1, script_out)
 
+        # ---------- 可选：用大模型 + Remotion skill 生成 Remotion 代码 ----------
+        if get_settings().remotion_generate_code and steps is not None:
+            try:
+                logger.info("[pipeline] Remotion 代码生成（大模型 + skill）…")
+                remotion_tsx = generate_remotion_code(
+                    steps,
+                    animation_style=animation_style or get_settings().animation_style or None,
+                )
+                generated_path = work / "MathExplanation.generated.tsx"
+                generated_path.write_text(remotion_tsx, encoding="utf-8")
+                logger.info("[pipeline] Remotion 代码已写入 %s", generated_path)
+            except Exception as e:
+                logger.warning("[pipeline] Remotion 代码生成跳过或失败（不影响 HTML）: %s", e)
+
     # ---------- 阶段 2：TTS 与时长收集 ----------
     if start_step <= 2:
         _step(2, PIPELINE_STEPS[2])
@@ -131,6 +146,7 @@ def run_pipeline(
         if get_settings().remotion_enabled and steps is not None:
             try:
                 mp4_file = output_dir / "animation.mp4"
+                generated_tsx = work / "MathExplanation.generated.tsx"
                 render_remotion_video(
                     steps,
                     durations,
@@ -138,6 +154,7 @@ def run_pipeline(
                     mp4_file,
                     audio_prefix="step",
                     node_command=get_settings().remotion_node_command,
+                    generated_tsx_path=generated_tsx if generated_tsx.is_file() else None,
                 )
                 logger.info("[pipeline] Remotion MP4 已生成 %s", mp4_file)
             except Exception as e:

@@ -55,6 +55,7 @@ uv sync
 | `ANIMATION_STYLE`            | 可选。动画风格描述，注入脚本生成 prompt；为空则不追加 | 空                     |
 | `REMOTION_ENABLED`           | 为 true 时在 HTML 完成后用 Remotion 渲染 MP4（需 Node + remotion 依赖） | `false` |
 | `REMOTION_NODE_COMMAND`     | 执行 remotion/render.js 的 Node 可执行文件           | `node`  |
+| `REMOTION_GENERATE_CODE`    | 为 true 时用大模型 + Remotion skill 生成 TSX 网页动画代码，渲染时优先使用该组件 | `false` |
 
 ---
 
@@ -70,6 +71,7 @@ uv sync
 | **脚本生成 - 阶段 A** | 基于 steps 设计每步的网页动画方案（shared_css、shared_svg、step_plans 含 animation_description、image_prompt） | `PLAN_PROMPT`（仅文本）/ `PLAN_PROMPT_WITH_IMAGE`（文本+原图） | `script_generation/generator.py`：第 21、41 行常量，在 `_generate_plan()` 中按是否带图选择其一 |
 | **脚本生成 - 阶段 B** | 为每一步生成 `animate(container)` 的 JavaScript 函数体 | `STEP_CODE_PROMPT` | `script_generation/generator.py`：第 62 行常量，在 `_generate_step_code()` 中 `format(shared_css_summary=..., step_id=..., description=..., ...)` 后调用结构化 LLM |
 | **HTML 自愈** | 校验/渲染失败时，根据错误信息修复 HTML 动画代码 | 内联 prompt（错误信息 + 代码片段） | `asset_generation/html_render.py`：`fix_html_with_llm()` 内，约第 310 行 |
+| **Remotion 代码生成**（可选） | 根据 steps 与 Remotion skill 规则生成 TSX 组件代码 | `REMOTION_GENERATE_PROMPT` + 项目内 `.cursor/skills/remotion/rules` 下的 compositions/sequencing/audio/animations/timing 规则 | `script_generation/remotion_generator.py`：`generate_remotion_code()`，需 `REMOTION_GENERATE_CODE=true` |
 
 **Prompt 内容摘要：**
 
@@ -133,7 +135,7 @@ cd remotion/player-host && npm install && npm run build && cd ../..
 2. 在 `.env` 中设置：`REMOTION_ENABLED=true`（可选 `REMOTION_NODE_COMMAND=node`）
 3. 流水线在 HTML 渲染完成后会调用 `remotion/render.js`，在同一输出目录下生成 `animation.mp4`；失败仅打日志，不影响 HTML。
 
-**数据流：** 流水线将 steps、时长与 TTS 写入 `remotion-props.json`（并复制音频到 `results/{task_id}/audio/`），网页播放器读取该 JSON 与音频 URL；MP4 渲染则使用 `remotion-input.json` + `remotion/public/audio/` + `@remotion/renderer`。Composition 实现（`remotion/src/MathExplanation.tsx`）遵循 remotion-dev/skills 的 composition、sequencing、audio、animations 等规则。
+**数据流：** 流水线将 steps、时长与 TTS 写入 `remotion-props.json`（并复制音频到 `results/{task_id}/audio/`），网页播放器读取该 JSON 与音频 URL；MP4 渲染则使用 `remotion-input.json` + `remotion/public/audio/` + `@remotion/renderer`。Composition 实现（`remotion/src/MathExplanation.tsx`）遵循 remotion-dev/skills 的 composition、sequencing、audio、animations 等规则。若开启 **Remotion 代码生成**（`REMOTION_GENERATE_CODE=true`），大模型会依据项目内 Remotion skill 规则生成 `work/MathExplanation.generated.tsx`，渲染 MP4 时优先使用该组件作为网页动画。
 
 ---
 

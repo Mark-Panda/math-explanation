@@ -65,3 +65,5 @@ LLM_SCRIPT_TIMEOUT=300
 # REMOTION_ENABLED=false
 # 用于执行 remotion/render.js 的 Node 可执行文件
 # REMOTION_NODE_COMMAND=node
+# 为 true 时在脚本生成阶段用大模型 + Remotion skill 规则生成 TSX 代码（写入 work/MathExplanation.generated.tsx），渲染 MP4 时优先使用该组件
+# REMOTION_GENERATE_CODE=false
