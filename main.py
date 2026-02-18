@@ -30,6 +30,11 @@ app.include_router(router, prefix="/api", tags=["explainer"])
 # 结果 HTML 动画通过 /results/{task_id}.html 访问
 app.mount("/results", StaticFiles(directory=str(RESULTS_DIR)), name="results")
 
+# Remotion 网页播放器（需先执行 cd remotion/player-host && npm install && npm run build）
+PLAYER_DIST = Path(__file__).resolve().parent / "remotion" / "player-host" / "dist"
+if PLAYER_DIST.exists():
+    app.mount("/player", StaticFiles(directory=str(PLAYER_DIST), html=True), name="player")
+
 # Web 界面：静态页面目录
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():

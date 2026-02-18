@@ -59,3 +59,9 @@ ANIMATION_STYLE=儿童插画风：圆润线条、柔和配色（如浅粉、天�
 
 # 脚本生成阶段超时（单位：秒，填 300 表示 5 分钟；504 需在 ops-ai-gateway 或前置 Nginx 调大 proxy_read_timeout）
 LLM_SCRIPT_TIMEOUT=300
+
+# ========== Remotion 视频渲染（可选）==========
+# 为 true 时在 HTML 渲染完成后用项目内 remotion/ 子项目渲染 MP4，需安装 Node 与 remotion 依赖（见 README）
+# REMOTION_ENABLED=false
+# 用于执行 remotion/render.js 的 Node 可执行文件
+# REMOTION_NODE_COMMAND=node

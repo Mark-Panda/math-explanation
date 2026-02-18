@@ -55,3 +55,4 @@ data/
 *.local
 .cache/
 .cursor/
+node_modules/

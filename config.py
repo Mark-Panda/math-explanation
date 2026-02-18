@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # 示例："教科书风格、极简、白底；动画以淡入和滑入为主，避免花哨效果"
     animation_style: str = ""
 
+    # Remotion 视频渲染（项目内集成 remotion/ 子项目，产出 MP4）
+    remotion_enabled: bool = False
+    """为 True 时在 HTML 渲染完成后调用 Remotion 渲染 MP4，需安装 Node 与 remotion 依赖。"""
+    remotion_node_command: str = "node"
+    """用于执行 remotion/render.js 的 Node 可执行文件。"""
+
 
 def get_settings() -> Settings:
     return Settings()

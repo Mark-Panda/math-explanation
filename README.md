@@ -53,6 +53,8 @@ uv sync
 | `HTML_SELF_HEAL_MAX_ATTEMPTS`| HTML 动画代码自愈最大重试次数      | `3`                    |
 | `DEFAULT_WAIT_SECONDS`       | 时长不足时默认 step 时长（秒）    | `2.0`                  |
 | `ANIMATION_STYLE`            | 可选。动画风格描述，注入脚本生成 prompt；为空则不追加 | 空                     |
+| `REMOTION_ENABLED`           | 为 true 时在 HTML 完成后用 Remotion 渲染 MP4（需 Node + remotion 依赖） | `false` |
+| `REMOTION_NODE_COMMAND`     | 执行 remotion/render.js 的 Node 可执行文件           | `node`  |
 
 ---
 
@@ -107,6 +109,34 @@ uv sync
 
 ---
 
+## Remotion 集成（网页播放 + 可选 MP4 输出）
+
+项目内已集成 [remotion-dev/skills](https://github.com/remotion-dev/skills) 风格的 Remotion 子项目，提供两种用法：
+
+### 1. 用 Remotion 做「网页动画」播放（推荐）
+
+生成成功后，除「查看」HTML 动画外，可点击 **「Remotion 播放」**，在浏览器中用 Remotion Player 按时间轴播放步骤 + TTS 旁白（与 MP4 同一套 Composition，无需预先渲染视频）。
+
+**前置条件：** 构建一次 Remotion 播放器前端即可（需 Node 18+）：
+
+```bash
+cd remotion/player-host && npm install && npm run build && cd ../..
+```
+
+之后启动服务，生成任务完成后结果目录会写入 `remotion-props.json` 与音频；前端历史记录中会出现「Remotion 播放」按钮，指向 `/player/?task_id=xxx`。
+
+### 2. 可选：流水线内渲染 MP4
+
+若希望流水线在产出 HTML 的同时**再产出 MP4 文件**：
+
+1. 安装 Remotion 主项目依赖：`cd remotion && npm install && cd ..`
+2. 在 `.env` 中设置：`REMOTION_ENABLED=true`（可选 `REMOTION_NODE_COMMAND=node`）
+3. 流水线在 HTML 渲染完成后会调用 `remotion/render.js`，在同一输出目录下生成 `animation.mp4`；失败仅打日志，不影响 HTML。
+
+**数据流：** 流水线将 steps、时长与 TTS 写入 `remotion-props.json`（并复制音频到 `results/{task_id}/audio/`），网页播放器读取该 JSON 与音频 URL；MP4 渲染则使用 `remotion-input.json` + `remotion/public/audio/` + `@remotion/renderer`。Composition 实现（`remotion/src/MathExplanation.tsx`）遵循 remotion-dev/skills 的 composition、sequencing、audio、animations 等规则。
+
+---
+
 ## 可配置项（自愈、时长与动画风格）
 
 - **HTML 自愈重试次数**：`HTML_SELF_HEAL_MAX_ATTEMPTS`，默认 3。HTML 动画校验或渲染失败时由 LLM 修复后重试，超过此次数则任务失败。
@@ -120,6 +150,7 @@ uv sync
 - `problem_analysis/`：题目理解与 steps schema；图片识别、公式验证、题目分析（含各 prompt 常量）
 - `script_generation/`：两阶段脚本生成（动画方案 + 每步 JS 代码），产出 HTML 片段与 image_prompts
 - `asset_generation/`：TTS、时长注入、HTML 动画校验与渲染（含自愈）、SD 占位
+- `remotion/`：Remotion 子项目（React 视频），流水线在开启 `REMOTION_ENABLED` 时调用其渲染 MP4；实现遵循 [remotion-dev/skills](https://github.com/remotion-dev/skills) 的 composition / sequencing / audio 等规则
 - `composition/`：FFmpeg 音频拼接/视频合成（当前主流程为 HTML 动画，此模块为 Manim 视频流程预留）
 - `api/`：流水线编排、任务存储、FastAPI 路由
 - `config.py`：pydantic-settings 配置

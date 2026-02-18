@@ -3,7 +3,9 @@ import logging
 from pathlib import Path
 from typing import Callable
 
+from config import get_settings
 from asset_generation.html_render import render_html_with_self_heal
+from asset_generation.remotion_render import render_remotion_video
 from asset_generation.timing import inject_timing_into_html
 from asset_generation.tts import generate_audios_for_steps
 from problem_analysis.analyzer import analyze_problem
@@ -47,7 +49,7 @@ def run_pipeline(
     :param on_step_start: 进度回调 on_step_start(step_index, step_name)
     :param force_restart: 为 True 时忽略已有检查点，从头执行
     :param animation_style: 可选，动画风格描述，注入脚本生成 prompt；为 None 时使用 config
-    :return: 最终 HTML 动画文件路径。任一步失败则向上抛出异常。
+    :return: (最终 HTML 动画文件路径, steps, durations)，供调用方写 Remotion 网页 props 等。任一步失败则向上抛出异常。
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -124,10 +126,27 @@ def run_pipeline(
         logger.info("[pipeline] HTML 渲染完成 %s", final_html_file)
         save_step_checkpoint(work, 3, None)
         clear_checkpoint(work)
-        return final_html_file
+
+        # ---------- 可选：Remotion 渲染 MP4 ----------
+        if get_settings().remotion_enabled and steps is not None:
+            try:
+                mp4_file = output_dir / "animation.mp4"
+                render_remotion_video(
+                    steps,
+                    durations,
+                    audio_dir,
+                    mp4_file,
+                    audio_prefix="step",
+                    node_command=get_settings().remotion_node_command,
+                )
+                logger.info("[pipeline] Remotion MP4 已生成 %s", mp4_file)
+            except Exception as e:
+                logger.warning("[pipeline] Remotion 渲染跳过或失败（不影响 HTML 结果）: %s", e)
+
+        return (final_html_file, steps, durations)
 
     final_html_file = output_dir / "animation.html"
     if final_html_file.exists():
         clear_checkpoint(work)
-        return final_html_file
+        return (final_html_file, steps, durations)
     raise RuntimeError("流水线未执行到 HTML 渲染步骤且无成品文件")

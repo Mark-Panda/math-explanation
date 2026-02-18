@@ -12,6 +12,7 @@ from api.models import (
     TaskStatusResponse,
 )
 from api.pipeline import run_pipeline
+from asset_generation.remotion_render import write_remotion_props_for_player
 from api.task_store import (
     create_task,
     delete_task,
@@ -55,7 +56,7 @@ def _run_pipeline_task_retry(task_id: str) -> None:
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
-        result_path = run_pipeline(
+        result_path, steps_out, durations_out = run_pipeline(
             problem_text,
             output_dir,
             image_base64=None,
@@ -68,6 +69,18 @@ def _run_pipeline_task_retry(task_id: str) -> None:
         shutil.copy(str(result_path), str(dest))
         set_success(task_id, f"/results/{task_id}.html")
         logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
+        if steps_out and durations_out:
+            try:
+                write_remotion_props_for_player(
+                    steps_out,
+                    durations_out,
+                    output_dir / "work" / "audio",
+                    RESULTS_DIR,
+                    task_id,
+                    audio_prefix="step",
+                )
+            except Exception as e:
+                logger.warning("[retry] Remotion 网页 props 写入跳过: %s", e)
     except Exception as e:
         logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
         set_failed(task_id, str(e))
@@ -134,7 +147,7 @@ def _run_pipeline_task(
             set_progress(task_id, step_name)
 
         # ---------- 执行流水线（传入原图 base64、可选动画风格） ----------
-        result_path = run_pipeline(
+        result_path, steps_out, durations_out = run_pipeline(
             problem_text.strip(),
             output_dir,
             image_base64=img_b64,
@@ -147,6 +160,19 @@ def _run_pipeline_task(
         shutil.copy(str(result_path), str(dest))
         set_success(task_id, f"/results/{task_id}.html")
         logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
+        # 为 Remotion 网页播放准备 props 与音频（便于用户选「Remotion 播放」）
+        if steps_out and durations_out:
+            try:
+                write_remotion_props_for_player(
+                    steps_out,
+                    durations_out,
+                    output_dir / "work" / "audio",
+                    RESULTS_DIR,
+                    task_id,
+                    audio_prefix="step",
+                )
+            except Exception as e:
+                logger.warning("[generate] Remotion 网页 props 写入跳过: %s", e)
     except Exception as e:
         logger.exception("[generate] task_id=%s 生成失败: %s", task_id, e)
         set_failed(task_id, str(e))

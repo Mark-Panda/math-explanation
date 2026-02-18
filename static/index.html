@@ -464,6 +464,7 @@
             html += '<div class="actions">';
             if (item.status === 'success' && item.result_path) {
               html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">查看</button>';
+              html += '<a class="btn btn-ghost" href="/player/?task_id=' + encodeURIComponent(item.task_id) + '" target="_blank">Remotion 播放</a>';
               html += '<a class="btn btn-ghost" href="' + item.result_path + '" target="_blank">新窗口打开</a>';
               html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + '.html">下载</a>';
             }
