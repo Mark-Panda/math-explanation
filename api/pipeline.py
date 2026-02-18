@@ -118,6 +118,18 @@ def run_pipeline(
     # ---------- 阶段 3：时长注入与 HTML 渲染 ----------
     if start_step <= 3:
         _step(3, PIPELINE_STEPS[3])
+        import json
+        step_list = [
+            {
+                "step_id": getattr(s, "step_id", i + 1),
+                "description": (getattr(s, "description", None) or "").strip(),
+                "voiceover_text": (getattr(s, "voiceover_text", None) or "").strip(),
+            }
+            for i, s in enumerate(steps)
+        ]
+        script_content = "window.stepDescriptions = " + json.dumps(step_list, ensure_ascii=False)
+        script_content = script_content.replace("</script>", "<\\/script>")
+        animation_html = animation_html + "\n<script>" + script_content + "</script>"
         final_html_code = inject_timing_into_html(animation_html, durations)
         final_html_file = output_dir / "animation.html"
         render_html_with_self_heal(final_html_code, audio_dir, final_html_file, audio_prefix="step")

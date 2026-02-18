@@ -91,6 +91,7 @@ STEP_CODE_PROMPT = """你是前端动画工程师。请为以下数学讲解步�
 - 使用 innerHTML 追加或 createElement/createElementNS 创建元素
 - 可以使用已有的共享 CSS class
 - 动画用 CSS animation 或 transition，元素添加后自动播放
+- **不要使用 async/await 或 Promise**；需要延迟时用 setTimeout(function() {{ ... }}, 毫秒数)，否则会导致语法错误无法播放
 - 公式用 Unicode 数学符号，不用 MathJax/KaTeX
 - 几何图形操作已有的 SVG 底图（如改变颜色、添加标注等）
 - **不要**使用 window、document.body、alert、playVoice 等全局或未定义函数；**不要**在代码里播放音频，旁白由系统按步自动播放，本代码只负责画面与公式
@@ -199,6 +200,24 @@ def _assemble_html(
         """防止步骤代码中的 </script> 在 HTML 中提前结束脚本块，导致 stepAnimations 未定义、页面显示 0 步。"""
         return raw.replace("</script>", "<\\/script>").replace("</SCRIPT>", "<\\/SCRIPT>")
 
+    def _strip_function_wrapper(raw: str) -> str:
+        """若 LLM 返回了完整的 function(container) { ... }，只保留函数体，避免被拼成 animate: function(container) { function(container) { ... } } 导致语法错误。"""
+        s = raw.strip()
+        if not s.startswith("function") or "container" not in s[:30]:
+            return raw
+        idx = s.find("{")
+        if idx == -1:
+            return raw
+        depth = 1
+        for i, c in enumerate(s[idx + 1 :], start=idx + 1):
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[idx + 1 : i].strip()
+        return raw
+
     steps_js_items = []
     for i, code in enumerate(step_codes):
         # 清理可能的 markdown 代码块包裹
@@ -209,7 +228,11 @@ def _assemble_html(
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             clean_code = "\n".join(lines)
+        clean_code = _strip_function_wrapper(clean_code)
         clean_code = _escape_script_close(clean_code)
+        # 若步骤代码含 await，必须在 async 上下文中运行，否则会语法错误导致无法播放
+        if "await " in clean_code:
+            clean_code = "(async function() {\n  " + clean_code.replace("\n", "\n  ") + "\n})();"
 
         steps_js_items.append(
             f"  {{\n"

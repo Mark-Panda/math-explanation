@@ -111,6 +111,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
       color: #24292f;
     }}
+    #step-description {{
+      padding: 0.75rem 1.5rem;
+      min-height: 2.5rem;
+      background: #e8edf2;
+      border-top: 1px solid #e1e4e8;
+      color: #1f2328;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }}
+    #step-description:empty {{ padding: 0.5rem 1.5rem; }}
   </style>
 </head>
 <body>
@@ -123,6 +133,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <span id="step-info">共 <span id="total-steps">0</span> 步</span>
       </div>
     </div>
+    <div id="step-description" aria-live="polite"></div>
     <div id="animation-wrapper">
       {animation_html}
     </div>
@@ -150,6 +161,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     var totalStepsEl = document.getElementById('total-steps');
     var progressFill = document.getElementById('progress-fill');
     var container = document.getElementById('animation-container');
+    var stepDescriptionEl = document.getElementById('step-description');
+    var stepDescriptions = window.stepDescriptions || [];
     var initialAnimationContent = container ? container.innerHTML : '';
 
     if (totalSteps === 0) {{
@@ -158,6 +171,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (playBtn) playBtn.disabled = true;
     }} else {{
       totalStepsEl.textContent = totalSteps;
+    }}
+
+    function updateStepDescription() {{
+      if (!stepDescriptionEl) return;
+      if (currentStep >= totalSteps) {{
+        stepDescriptionEl.textContent = totalSteps > 0 ? '讲解完成。' : '';
+      }} else if (stepDescriptions[currentStep] && stepDescriptions[currentStep].description) {{
+        stepDescriptionEl.textContent = stepDescriptions[currentStep].description;
+      }} else {{
+        stepDescriptionEl.textContent = '';
+      }}
     }}
 
     function updateUI() {{
@@ -174,6 +198,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         stepInfo.classList.remove('done');
         progressFill.style.width = ((currentStep / totalSteps) * 100) + '%';
       }}
+      updateStepDescription();
     }}
 
     function playStep(index) {{
@@ -236,6 +261,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       playBtn.textContent = '▶ 播放';
       playBtn.disabled = false;
       updateUI();
+      updateStepDescription();
     }});
 
     if (totalSteps > 0) updateUI();
