@@ -59,3 +59,18 @@ ANIMATION_STYLE=儿童插画风：圆润线条、柔和配色（如浅粉、天�
 
 # 脚本生成阶段超时（单位：秒，填 300 表示 5 分钟；504 需在 ops-ai-gateway 或前置 Nginx 调大 proxy_read_timeout）
 LLM_SCRIPT_TIMEOUT=300
+
+# ========== Tutor 视频流水线（仅当界面/API 选择 output_format=video 时生效）==========
+# 需先安装 Manim：pip install manim 或取消 requirements.txt 中 manim 注释
+
+# Manim 可执行命令（或绝对路径，如 /usr/local/bin/manim）
+MANIM_COMMAND=manim
+
+# 要渲染的场景类名
+MANIM_SCENE_CLASS=MathScene
+
+# 渲染质量：ql=480p, qm=720p30, qh=1080p60, qk=4K
+MANIM_QUALITY=qh
+
+# 渲染失败时 LLM 自愈最大重试次数
+MANIM_SELF_HEAL_MAX_ATTEMPTS=3

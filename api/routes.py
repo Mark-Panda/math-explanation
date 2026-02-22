@@ -11,7 +11,7 @@ from api.models import (
     RegenerateResponse,
     TaskStatusResponse,
 )
-from api.pipeline import run_pipeline
+from api.pipeline import run_pipeline, run_tutor_pipeline, PIPELINE_STEPS_TUTOR
 from api.task_store import (
     create_task,
     delete_task,
@@ -38,7 +38,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _run_pipeline_task_retry(task_id: str) -> None:
-    """断点重试：仅用历史中的题目文本重新跑流水线，从检查点继续（不传图、不重新 OCR）。"""
+    """断点重试：用历史中的题目文本与 output_format 重新跑对应流水线，从检查点继续（不传图、不重新 OCR）。"""
     rec = history_get(task_id)
     if not rec:
         set_failed(task_id, "任务记录不存在")
@@ -47,27 +47,43 @@ def _run_pipeline_task_retry(task_id: str) -> None:
     if not problem_text:
         set_failed(task_id, "无题目文本，无法断点重试")
         return
+    output_format = getattr(rec, "output_format", "html") or "html"
     output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
-    logger.info("[retry] 断点重试 task_id=%s", task_id)
+    logger.info("[retry] 断点重试 task_id=%s output_format=%s", task_id, output_format)
     try:
         set_running(task_id)
 
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
-        result_path = run_pipeline(
-            problem_text,
-            output_dir,
-            image_base64=None,
-            image_mime_type="image/jpeg",
-            on_step_start=on_step_start,
-            force_restart=False,
-        )
-        dest = RESULTS_DIR / f"{task_id}.html"
-        import shutil
-        shutil.copy(str(result_path), str(dest))
-        set_success(task_id, f"/results/{task_id}.html")
-        logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
+        if output_format == "video":
+            result_path = run_tutor_pipeline(
+                problem_text,
+                output_dir,
+                image_base64=None,
+                image_mime_type="image/jpeg",
+                on_step_start=on_step_start,
+                force_restart=False,
+            )
+            dest = RESULTS_DIR / f"{task_id}.mp4"
+            import shutil
+            shutil.copy(str(result_path), str(dest))
+            set_success(task_id, f"/results/{task_id}.mp4")
+            logger.info("[retry] task_id=%s 视频重试成功 path=%s", task_id, dest)
+        else:
+            result_path = run_pipeline(
+                problem_text,
+                output_dir,
+                image_base64=None,
+                image_mime_type="image/jpeg",
+                on_step_start=on_step_start,
+                force_restart=False,
+            )
+            dest = RESULTS_DIR / f"{task_id}.html"
+            import shutil
+            shutil.copy(str(result_path), str(dest))
+            set_success(task_id, f"/results/{task_id}.html")
+            logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
     except Exception as e:
         logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
         set_failed(task_id, str(e))
@@ -79,10 +95,11 @@ def _run_pipeline_task(
     image_bytes: bytes | None = None,
     image_mime_type: str = "image/jpeg",
     animation_style: str | None = None,
+    output_format: str = "html",
 ) -> None:
-    """后台执行：若有图片则先识别题目 → 公式验证 → 带原图跑流水线。"""
+    """后台执行：若有图片则先识别题目 → 公式验证；再根据 output_format 跑 HTML 流水线或 Tutor 视频流水线。"""
     output_dir = Path(__file__).resolve().parent.parent / "output" / task_id
-    logger.info("[generate] 后台任务开始 task_id=%s 有图片=%s", task_id, bool(image_bytes))
+    logger.info("[generate] 后台任务开始 task_id=%s 有图片=%s output_format=%s", task_id, bool(image_bytes), output_format)
 
     # 原图 base64（贯穿流水线，让后续 LLM 调用都能看到原图）
     img_b64: str | None = None
@@ -133,20 +150,34 @@ def _run_pipeline_task(
         def on_step_start(step_index: int, step_name: str) -> None:
             set_progress(task_id, step_name)
 
-        # ---------- 执行流水线（传入原图 base64、可选动画风格） ----------
-        result_path = run_pipeline(
-            problem_text.strip(),
-            output_dir,
-            image_base64=img_b64,
-            image_mime_type=image_mime_type,
-            on_step_start=on_step_start,
-            animation_style=animation_style,
-        )
-        dest = RESULTS_DIR / f"{task_id}.html"
-        import shutil
-        shutil.copy(str(result_path), str(dest))
-        set_success(task_id, f"/results/{task_id}.html")
-        logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
+        # ---------- 执行流水线 ----------
+        if output_format == "video":
+            result_path = run_tutor_pipeline(
+                problem_text.strip(),
+                output_dir,
+                image_base64=img_b64,
+                image_mime_type=image_mime_type,
+                on_step_start=on_step_start,
+            )
+            dest = RESULTS_DIR / f"{task_id}.mp4"
+            import shutil
+            shutil.copy(str(result_path), str(dest))
+            set_success(task_id, f"/results/{task_id}.mp4")
+            logger.info("[generate] task_id=%s 视频生成成功 path=%s", task_id, dest)
+        else:
+            result_path = run_pipeline(
+                problem_text.strip(),
+                output_dir,
+                image_base64=img_b64,
+                image_mime_type=image_mime_type,
+                on_step_start=on_step_start,
+                animation_style=animation_style,
+            )
+            dest = RESULTS_DIR / f"{task_id}.html"
+            import shutil
+            shutil.copy(str(result_path), str(dest))
+            set_success(task_id, f"/results/{task_id}.html")
+            logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
     except Exception as e:
         logger.exception("[generate] task_id=%s 生成失败: %s", task_id, e)
         set_failed(task_id, str(e))
@@ -162,11 +193,14 @@ async def generate_video(
     problem: str | None = Form(None, description="题目文本，与图片二选一或同时提供（有图片时以识别结果为准）"),
     image: UploadFile | None = File(None, description="题目图片，将使用视觉模型识别题目文字"),
     animation_style: str | None = Form(None, description="可选，动画风格描述，会注入到生成 prompt 中；不填则使用环境变量 ANIMATION_STYLE"),
+    output_format: str = Form("html", description="输出格式：html=网页动画，video=Manim 视频（/tutor 逻辑）"),
 ):
-    """支持 multipart：仅文本、仅图片、或文本+图片。图片识别在后台执行，请求立即返回 task_id，避免 nginx 等代理超时。"""
+    """支持 multipart：仅文本、仅图片、或文本+图片。output_format=video 时按 /tutor 技能逻辑生成 Manim 视频。"""
     problem_text: str | None = _normalize_problem(problem)
     image_bytes: bytes | None = None
     image_mime_type: str = "image/jpeg"
+    if output_format not in ("html", "video"):
+        output_format = "html"
 
     if image and image.filename:
         content_type = image.content_type or "image/jpeg"
@@ -184,10 +218,14 @@ async def generate_video(
         raise HTTPException(status_code=400, detail="请提供题目文本或上传题目图片")
 
     problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
-    task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
-    logger.info("[generate] 收到请求 task_id=%s 有文字=%s 有图片=%s", task_id, bool(problem_text), bool(image_bytes))
+    task_id = create_task(
+        problem_preview=problem_preview,
+        problem_text=problem_text,
+        output_format=output_format,
+    )
+    logger.info("[generate] 收到请求 task_id=%s 有文字=%s 有图片=%s output_format=%s", task_id, bool(problem_text), bool(image_bytes), output_format)
     style = (animation_style or "").strip() or None
-    background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type, style)
+    background_tasks.add_task(_run_pipeline_task, task_id, problem_text, image_bytes, image_mime_type, style, output_format)
     return GenerateVideoResponse(task_id=task_id, status="pending")
 
 
@@ -271,6 +309,19 @@ async def regenerate(background_tasks: BackgroundTasks, body: RegenerateRequest)
             detail="该记录无题目文本（如仅图片上传且未保存），无法重新生成",
         )
     problem_preview = (problem_text or "")[:120]
-    new_task_id = create_task(problem_preview=problem_preview, problem_text=problem_text)
-    background_tasks.add_task(_run_pipeline_task, new_task_id, problem_text, None, "image/jpeg", None)
+    output_format = getattr(rec, "output_format", "html") or "html"
+    new_task_id = create_task(
+        problem_preview=problem_preview,
+        problem_text=problem_text,
+        output_format=output_format,
+    )
+    background_tasks.add_task(
+        _run_pipeline_task,
+        new_task_id,
+        problem_text,
+        None,
+        "image/jpeg",
+        None,
+        output_format,
+    )
     return RegenerateResponse(task_id=new_task_id, status="pending")

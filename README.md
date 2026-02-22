@@ -1,6 +1,11 @@
 # 数学讲解流水线
 
-从数学题目自动生成带旁白与网页动画的讲解。流水线：**题目分析（LLM）→ 网页动画脚本生成（HTML + 旁白）→ TTS 与时长收集 → 时长注入与 HTML 渲染（含自愈）**。提供 Web 界面：输入题目或上传题目图片、触发生成、轮询状态、页面内播放与下载。
+从数学题目自动生成带旁白的讲解内容，支持两种输出模式：
+
+- **网页动画（默认）**：题目分析 → 网页动画脚本生成（HTML + 旁白）→ TTS 与时长收集 → 时长注入与 HTML 渲染（含自愈），得到单页可播放的 HTML。
+- **Manim 视频（Tutor 流水线）**：按 [Tutor 技能](.cursor/skills/tutor/SKILL.md) 逻辑：数学分析(tutor) → HTML 可视化 → 分镜脚本 → TTS → 验证 → 脚手架 → Manim 实现 → 检查与渲染，得到 MP4 视频。
+
+提供 Web 界面与 API：输入题目或上传题目图片、选择输出格式、触发生成、轮询状态、页面内播放或下载。
 
 ---
 
@@ -45,7 +50,7 @@ uv sync
 | `VISION_TEMPERATURE`    | 视觉模型温度             | 用 LLM   |
 | `VISION_REQUEST_TIMEOUT`| 视觉模型超时（秒）       | 用 LLM   |
 
-**其他：**
+**其他（HTML 流水线 / 通用）：**
 
 | 变量                         | 说明                               | 默认                   |
 | ---------------------------- | ---------------------------------- | ---------------------- |
@@ -53,6 +58,15 @@ uv sync
 | `HTML_SELF_HEAL_MAX_ATTEMPTS`| HTML 动画代码自愈最大重试次数      | `3`                    |
 | `DEFAULT_WAIT_SECONDS`       | 时长不足时默认 step 时长（秒）    | `2.0`                  |
 | `ANIMATION_STYLE`            | 可选。动画风格描述，注入脚本生成 prompt；为空则不追加 | 空                     |
+
+**Tutor 视频流水线（仅当 `output_format=video` 时）：**
+
+| 变量                         | 说明                               | 默认        |
+| ---------------------------- | ---------------------------------- | ----------- |
+| `MANIM_COMMAND`              | Manim 可执行命令或绝对路径         | `manim`     |
+| `MANIM_SCENE_CLASS`          | 要渲染的场景类名                   | `MathScene` |
+| `MANIM_QUALITY`              | 渲染质量：`ql`/`qm`/`qh`/`qk`      | `qh`        |
+| `MANIM_SELF_HEAL_MAX_ATTEMPTS` | 渲染失败时 LLM 自愈最大重试次数   | `3`         |
 
 ---
 
@@ -69,6 +83,15 @@ uv sync
 | **脚本生成 - 阶段 B** | 为每一步生成 `animate(container)` 的 JavaScript 函数体 | `STEP_CODE_PROMPT` | `script_generation/generator.py`：第 62 行常量，在 `_generate_step_code()` 中 `format(shared_css_summary=..., step_id=..., description=..., ...)` 后调用结构化 LLM |
 | **HTML 自愈** | 校验/渲染失败时，根据错误信息修复 HTML 动画代码 | 内联 prompt（错误信息 + 代码片段） | `asset_generation/html_render.py`：`fix_html_with_llm()` 内，约第 310 行 |
 
+**Tutor 视频流水线（`output_format=video`）中的 LLM 阶段：**
+
+| 阶段 | 用途 | 说明 | 位置 |
+|------|------|------|------|
+| **数学分析(tutor)** | 输出数学事实分析（已知条件、推导事实、图形构建方法、结论） | 仅文本 / 文本+原图 | `tutor_pipeline/stages.py`：`MATH_ANALYSIS_PROMPT*`，`analyze_math_tutor()` |
+| **HTML 可视化** | 根据数学分析生成 HTML+SVG 画图过程 | 纯文本 | `tutor_pipeline/stages.py`：`HTML_VISUALIZATION_PROMPT`，`generate_html_visualization()` |
+| **分镜脚本** | 生成分镜设计 + 音频生成清单表 | 纯文本 | `tutor_pipeline/stages.py`：`STORYBOARD_PROMPT`，`generate_storyboard()` |
+| **Manim 实现** | 根据分镜与脚手架补全完整 script.py | 纯文本，长超时 | `tutor_pipeline/stages.py`：`IMPLEMENT_SCRIPT_PROMPT`，`implement_script()` |
+
 **Prompt 内容摘要：**
 
 - **VISION_PROMPT**：要求按「题目文字」「图形描述」「公式列表」三部分输出，公式用 LaTeX，图形描述包含类型、标注、边长角度等。
@@ -77,6 +100,9 @@ uv sync
 - **PLAN_PROMPT / PLAN_PROMPT_WITH_IMAGE**：数学动画设计师角色，输出 shared_css、shared_svg、step_plans（step_id、animation_description、image_prompt）；约束 800×600、Unicode 公式、纯 CSS 动画、SVG 几何。若配置了 **动画风格**（`ANIMATION_STYLE` 或接口参数 `animation_style`），会在此处及阶段 B 追加「动画风格要求」。
 - **STEP_CODE_PROMPT**：前端动画工程师角色，给定当前步骤描述、公式、视觉重点、旁白、动画方案，输出 `animate_body`（仅函数体），通过 `container` 操作 DOM，仅用 CSS 动画与已有 SVG，不用外部库。同样会注入动画风格要求（若有）。
 - **HTML 自愈**：给定错误信息与问题代码，要求只返回完整可运行 HTML 片段，保留 `animation-container`、`stepAnimations`、`STEP_PLACEHOLDER`，不用外部库。
+- **Tutor 数学分析**：数学专家角色，输出「已知条件 / 推导事实 / 图形构建方法 / 需要证明的结论」；禁止用坐标系求解，用几何推理。
+- **Tutor 分镜**：视频分镜设计师角色，输出分镜设计（画面、字幕、读白、动画、退场）与音频生成清单表（幕号、文件名、读白文本、时长留空）。
+- **Tutor Manim 实现**：Manim 动画工程师角色，补全 `calculate_geometry`、`assert_geometry`、每幕 `add_sound` 与动画，全部用 `Text` 不用 `MathTex`。
 
 ---
 
@@ -98,12 +124,18 @@ uv sync
 
 3. 打开浏览器访问 **Web 界面**：  
    **http://localhost:8000/**  
-   输入题目或上传题目图片，点击「生成视频」，等待完成后在页内播放或下载。
+   输入题目或上传题目图片，选择输出格式（网页动画 / Manim 视频），点击「生成视频」，等待完成后在页内播放或下载。
 
-4. API 说明：
-   - `POST /api/generate_video`：提交题目。支持 **multipart/form-data**：`problem`（题目文本，可选）、`image`（题目图片，可选）、`animation_style`（可选，动画风格描述，会注入到脚本生成 prompt；不填则使用环境变量 `ANIMATION_STYLE`）。仅文本、仅图片或两者均可；有图片时先识别文字并可选公式验证，再带原图跑流水线。返回 `{"task_id": "uuid", "status": "pending"}`。
+4. **输出格式**：
+   - `html`（默认）：生成单页 HTML 动画，适合快速预览、无需安装 Manim。
+   - `video`：按 Tutor 技能 8 步生成 Manim MP4，需安装 Manim（见下方「Tutor 视频流水线」）。
+
+5. API 说明：
+   - `POST /api/generate_video`：提交题目。**multipart/form-data** 字段：`problem`（题目文本，可选）、`image`（题目图片，可选）、`animation_style`（可选）、`output_format`（可选，`html` | `video`，默认 `html`）。`output_format=video` 时走 Tutor 流水线，返回 MP4 的 `result_url`。
    - **前置 Nginx**：接口已改为立即返回 task_id，后台执行识别与生成。若仍 504，可调大 `proxy_read_timeout`（如 `120s`）。**脚本生成阶段** 504 多为转发到 LLM 的网关读超时过短，建议该网关 `proxy_read_timeout` **180s 或 300s**，并设置 `LLM_SCRIPT_TIMEOUT=300`。
-   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时结果中包含可播放/下载的地址。
+   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时 `result_url` 为可播放/下载的地址（`/results/{task_id}.html` 或 `/results/{task_id}.mp4`）。
+   - `POST /api/tasks/{task_id}/retry`：对失败任务断点重试（当前仅支持 HTML 流水线）。
+   - `GET /api/history`、`DELETE /api/history/{task_id}`、`POST /api/regenerate`：历史与重新生成。
 
 ---
 
@@ -113,6 +145,11 @@ uv sync
 - **默认 step 时长**：`DEFAULT_WAIT_SECONDS`，默认 2.0 秒。当 TTS 返回的时长数量少于步骤数时，不足的步骤使用该默认时长。
 - **动画风格**：`ANIMATION_STYLE` 或接口参数 `animation_style`。非空时会以「**动画风格要求**：xxx」的形式追加到脚本生成两阶段的 prompt 中，让大模型按该风格生成（如「教科书风格、极简、白底；动画以淡入和滑入为主，避免花哨效果」）。为空则不追加，沿用 prompt 内默认约束。
 
+- **Tutor 视频流水线**（`output_format=video`）：
+  - 需安装 Manim：`pip install manim` 或取消注释 `requirements.txt` 中的 `manim`；系统需 FFmpeg（TTS 已用）。
+  - 环境变量见上表（`MANIM_COMMAND`、`MANIM_SCENE_CLASS`、`MANIM_QUALITY`、`MANIM_SELF_HEAL_MAX_ATTEMPTS`）。
+  - 流水线 8 步：数学分析(tutor) → HTML 可视化 → 分镜脚本 → TTS 与时长 → 验证音频 → 脚手架 → Manim 实现 → 检查与渲染；支持断点检查点，失败后可重试从断点继续。
+
 ---
 
 ## 项目结构
@@ -121,7 +158,8 @@ uv sync
 - `script_generation/`：两阶段脚本生成（动画方案 + 每步 JS 代码），产出 HTML 片段与 image_prompts
 - `asset_generation/`：TTS、时长注入、HTML 动画校验与渲染（含自愈）、SD 占位
 - `composition/`：FFmpeg 音频拼接/视频合成（当前主流程为 HTML 动画，此模块为 Manim 视频流程预留）
-- `api/`：流水线编排、任务存储、FastAPI 路由
+- `api/`：流水线编排（HTML / Tutor 视频）、任务存储、FastAPI 路由
+- `tutor_pipeline/`：/tutor 技能服务端实现（数学分析、HTML 可视化、分镜、TTS、脚手架、Manim 实现、渲染）
 - `config.py`：pydantic-settings 配置
 - `llm_runner.py`：LangChain 可复用 LLM 调用（结构化/纯文本/多模态）
 - `main.py`：FastAPI 应用入口

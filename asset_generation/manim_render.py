@@ -7,17 +7,29 @@ from config import get_settings
 from llm_runner import invoke_plain
 
 
+def _project_venv_manim_candidates() -> list[Path]:
+    """项目 .venv 下可能的 manim 可执行路径（Unix bin / Windows Scripts）。"""
+    project_root = Path(__file__).resolve().parent.parent
+    candidates = [
+        project_root / ".venv" / "bin" / "manim",
+        project_root / ".venv" / "Scripts" / "manim.exe",
+        project_root / ".venv" / "Scripts" / "manim",
+    ]
+    return [p for p in candidates if p.exists()]
+
+
 def _get_manim_args() -> list[str]:
     """
     返回用于 subprocess 的 manim 命令列表。
-    优先用「当前 Python -m manim」或项目 .venv 内的 manim，不依赖 PATH。
+    优先用 MANIM_COMMAND 绝对路径、当前解释器同目录 manim、当前解释器 python -m manim、
+    项目 .venv 内 manim（含 Windows Scripts）、最后 which(configured)。
     """
     import shutil
-    configured = get_settings().manim_command.strip()
-    # 配置为绝对路径且存在时，直接作为可执行文件用
-    if Path(configured).is_absolute() and Path(configured).exists():
+    configured = (get_settings().manim_command or "").strip()
+    # 配置为绝对路径且存在时，直接使用
+    if configured and Path(configured).is_absolute() and Path(configured).exists():
         return [configured]
-    # 当前解释器同目录的 manim 或 python -m manim
+    # 当前解释器同目录的 manim
     venv_bin = Path(sys.executable).resolve().parent
     manim_in_venv = venv_bin / "manim"
     if manim_in_venv.exists():
@@ -27,27 +39,29 @@ def _get_manim_args() -> list[str]:
         return [sys.executable, "-m", "manim"]
     except ImportError:
         pass
-    # 若当前解释器无 manim，尝试项目 .venv（例如未用 uv run 启动服务时）
+    # 项目 .venv（支持 Windows Scripts）
+    for manim_path in _project_venv_manim_candidates():
+        return [str(manim_path)]
+    # 项目 .venv 的 python -m manim（有时只有模块无脚本）
     project_root = Path(__file__).resolve().parent.parent
-    uv_venv_python = project_root / ".venv" / "bin" / "python"
-    uv_venv_manim = project_root / ".venv" / "bin" / "manim"
-    if uv_venv_manim.exists():
-        return [str(uv_venv_manim)]
-    if uv_venv_python.exists():
-        try:
-            import subprocess
-            subprocess.run(
-                [str(uv_venv_python), "-c", "import manim"],
-                capture_output=True,
-                timeout=5,
-                check=True,
-            )
-            return [str(uv_venv_python), "-m", "manim"]
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            pass
-    found = shutil.which(configured)
-    if found:
-        return [found]
+    for py_name in ("bin/python", "Scripts/python.exe", "Scripts/python"):
+        uv_venv_python = project_root / ".venv" / py_name
+        if uv_venv_python.exists():
+            try:
+                import subprocess
+                subprocess.run(
+                    [str(uv_venv_python), "-c", "import manim"],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
+                )
+                return [str(uv_venv_python), "-m", "manim"]
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                continue
+    if configured:
+        found = shutil.which(configured)
+        if found:
+            return [found]
     return []
 
 
@@ -120,12 +134,28 @@ def fix_code_with_llm(bad_code: str, error_msg: str) -> str:
     return invoke_plain(prompt)
 
 
+def fix_tutor_script_with_llm(bad_code: str, error_msg: str) -> str:
+    """Tutor 脚本渲染失败时，用 LLM 修复后返回新代码。要求保留 MathScene、Manim CE 兼容。"""
+    prompt = f"""这段 Manim 脚本运行报错，请修复后只返回完整可运行的 Python 代码，不要解释。
+
+错误信息:
+{error_msg}
+
+代码:
+```python
+{bad_code}
+```
+
+要求：保留 MathScene 类与 construct/play_scene 结构；使用 Manim Community Edition 兼容写法（虚线用 DashedLine 或 DashedVMobject，不要给 Line 传 dash_length）。只输出修复后的完整代码。"""
+    return invoke_plain(prompt)
+
+
 def render_manim_video_with_self_heal(code_string: str, output_file: str | Path) -> None:
     """
     自愈循环：执行渲染，失败则用 LLM 修复代码后重试，最多 N 次（配置项）。
     """
     settings = get_settings()
-    max_attempts = settings.manim_self_heal_max_attempts
+    max_attempts = getattr(settings, "manim_self_heal_max_attempts", 3)
     current_code = code_string
     last_error: str | None = None
     for attempt in range(max_attempts):
@@ -144,3 +174,70 @@ def render_manim_video_with_self_heal(code_string: str, output_file: str | Path)
                 raise RuntimeError(f"Manim 自愈已达最大重试次数 {max_attempts}，最后错误: {last_error}") from e
             current_code = fix_code_with_llm(current_code, last_error)
     raise RuntimeError(f"Manim 自愈失败: {last_error}")
+
+
+def render_manim_script(
+    script_code: str,
+    output_file: str | Path,
+    *,
+    scene_class: str | None = None,
+    quality: str | None = None,
+    audio_dir: str | Path | None = None,
+    audio_info_dict: dict | None = None,
+) -> None:
+    """
+    Tutor 流水线用：渲染给定脚本代码，使用指定场景类名与质量。
+    script_code 写入临时目录的 script.py；若提供 audio_dir，会复制到临时目录 audio/，
+    并写入 audio_info.json，以便脚本内 Path(__file__).parent / "audio" 与 audio_info.json 可用。
+    """
+    import shutil
+    import subprocess
+
+    scene_class = scene_class or getattr(get_settings(), "manim_scene_class", "MathScene")
+    quality = quality or getattr(get_settings(), "manim_quality", "qh")
+    quality_flag = "-" + quality if (quality and quality.startswith("q")) else "-q" + (quality or "h")
+    manim_args = _get_manim_args()
+    if not manim_args:
+        project_root = Path(__file__).resolve().parent.parent
+        expected = project_root / ".venv" / "bin" / "manim"
+        if not expected.exists():
+            expected = project_root / ".venv" / "Scripts" / "manim.exe"
+        expected_str = str(expected.resolve()) if expected.exists() else str((project_root / ".venv" / "bin" / "manim").resolve())
+        raise FileNotFoundError(
+            "未找到 manim。请在本项目目录执行 uv sync 安装 Manim 后，用该环境启动服务（如 uv run uvicorn main:app ...）；"
+            "或若 manim 已在别处安装，在 .env 中设置 MANIM_COMMAND 为可执行文件绝对路径，例如：MANIM_COMMAND=" + expected_str
+        )
+    out_path = Path(output_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    code_clean = _strip_markdown_code_block(script_code)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        script_py = tmpdir / "script.py"
+        script_py.write_text(code_clean, encoding="utf-8")
+        if audio_dir is not None:
+            src = Path(audio_dir)
+            if src.exists():
+                dest_audio = tmpdir / "audio"
+                shutil.copytree(src, dest_audio)
+            if audio_info_dict is not None:
+                import json
+                (tmpdir / "audio_info.json").write_text(
+                    json.dumps(audio_info_dict, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        proc = subprocess.run(
+            [*manim_args, str(script_py), scene_class, quality_flag],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=str(tmpdir),
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Manim 渲染失败 (exit {proc.returncode}): {proc.stderr or proc.stdout}"
+            )
+        media = tmpdir / "media" / "videos"
+        mp4s = list(media.rglob("*.mp4"))
+        if not mp4s:
+            raise RuntimeError("Manim 未生成 mp4 文件")
+        shutil.copy(str(mp4s[0]), str(out_path))

@@ -23,10 +23,19 @@ class TaskState:
 _tasks: dict[str, TaskState] = {}
 
 
-def create_task(problem_preview: str = "", problem_text: Optional[str] = None) -> str:
+def create_task(
+    problem_preview: str = "",
+    problem_text: Optional[str] = None,
+    output_format: str = "html",
+) -> str:
     task_id = str(uuid.uuid4())
     _tasks[task_id] = TaskState(task_id=task_id, status="pending")
-    history_create(task_id, problem_preview=problem_preview, problem_text=problem_text)
+    history_create(
+        task_id,
+        problem_preview=problem_preview,
+        problem_text=problem_text,
+        output_format=output_format,
+    )
     return task_id
 
 

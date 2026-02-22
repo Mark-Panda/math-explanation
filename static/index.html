@@ -277,6 +277,14 @@
   <h1>数学讲解动画生成</h1>
   <p class="muted">输入数学题目或上传题目图片，生成交互式网页动画讲解。可在此查看历史、删除或重新生成。</p>
 
+  <div style="margin-bottom: 1rem;">
+    <label for="output-format">输出格式</label>
+    <select id="output-format" style="margin-top: 0.25rem; padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 0.9rem;">
+      <option value="html">网页动画（HTML，快速预览）</option>
+      <option value="video">Manim 视频（MP4，需安装 Manim）</option>
+    </select>
+  </div>
+
   <div class="input-mode-wrap">
     <div class="input-mode-tabs" role="tablist">
       <button type="button" class="tab active" role="tab" id="tab-text" aria-selected="true">文字题目</button>
@@ -317,10 +325,11 @@
   </div>
   <div id="player">
     <iframe id="result-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+    <video id="result-video" controls style="width: 100%; max-height: 70vh; display: none; background: #000;"></video>
     <div class="player-actions">
       <a id="open-new-tab" href="" target="_blank">在新标签页打开</a>
       <span class="muted">|</span>
-      <a id="download" href="" download="">下载 HTML</a>
+      <a id="download" href="" download="">下载</a>
     </div>
   </div>
 
@@ -358,13 +367,17 @@
     var progressStepsEl = document.getElementById('progress-steps');
     var playerEl = document.getElementById('player');
     var resultFrame = document.getElementById('result-frame');
+    var resultVideoEl = document.getElementById('result-video');
     var openNewTabEl = document.getElementById('open-new-tab');
     var downloadEl = document.getElementById('download');
+    var outputFormatEl = document.getElementById('output-format');
+    var currentOutputFormat = 'html';
     var historyListEl = document.getElementById('history-list');
     var historyLoadingEl = document.getElementById('history-loading');
     var historyEmptyEl = document.getElementById('history-empty');
 
-    var ALL_STEPS = ['识别题目图片', '公式交叉验证', '题目分析', '网页动画脚本生成', 'TTS 与时长收集', '时长注入与 HTML 渲染'];
+    var ALL_STEPS_HTML = ['识别题目图片', '公式交叉验证', '题目分析', '网页动画脚本生成', 'TTS 与时长收集', '时长注入与 HTML 渲染'];
+    var ALL_STEPS_VIDEO = ['数学分析(tutor)', 'HTML 可视化', '分镜脚本', 'TTS 与时长', '验证音频', '脚手架', 'Manim 实现', '检查与渲染'];
 
     imageEl.addEventListener('change', function() {
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '未选择文件';
@@ -396,8 +409,9 @@
 
     function showProgress(currentStep) {
       progressCardEl.classList.remove('result-only');
-      var total = ALL_STEPS.length;
-      var currentIndex = currentStep ? ALL_STEPS.indexOf(currentStep) : -1;
+      var steps = currentOutputFormat === 'video' ? ALL_STEPS_VIDEO : ALL_STEPS_HTML;
+      var total = steps.length;
+      var currentIndex = currentStep ? steps.indexOf(currentStep) : -1;
       if (currentIndex < 0) {
         progressBarEl.classList.add('indeterminate');
         progressBarEl.style.width = '';
@@ -408,7 +422,7 @@
         progressBarEl.style.width = pct + '%';
         progressMetaEl.textContent = '第 ' + (currentIndex + 1) + ' 步，共 ' + total + ' 步 · ' + currentStep;
       }
-      progressStepsEl.innerHTML = ALL_STEPS.map(function(s, i) {
+      progressStepsEl.innerHTML = steps.map(function(s, i) {
         var state = 'pending';
         if (currentIndex >= 0) {
           if (i < currentIndex) state = 'done';
@@ -424,10 +438,25 @@
     }
 
     function showResult(url) {
-      resultFrame.src = url;
-      openNewTabEl.href = url;
-      downloadEl.href = url;
-      downloadEl.download = 'math_animation.html';
+      var isVideo = /\.mp4$/i.test(url);
+      if (isVideo) {
+        resultFrame.style.display = 'none';
+        resultVideoEl.style.display = 'block';
+        resultVideoEl.src = url;
+        openNewTabEl.href = url;
+        downloadEl.href = url;
+        downloadEl.download = 'math_explanation.mp4';
+        downloadEl.textContent = '下载 MP4';
+      } else {
+        resultVideoEl.style.display = 'none';
+        resultVideoEl.src = '';
+        resultFrame.style.display = 'block';
+        resultFrame.src = url;
+        openNewTabEl.href = url;
+        downloadEl.href = url;
+        downloadEl.download = 'math_animation.html';
+        downloadEl.textContent = '下载 HTML';
+      }
       playerEl.style.display = 'block';
     }
 
@@ -463,9 +492,10 @@
             html += '<div class="meta"><span class="badge ' + statusClass + '">' + statusText + '</span><span>' + formatDate(item.created_at) + '</span></div>';
             html += '<div class="actions">';
             if (item.status === 'success' && item.result_path) {
+              var isVideo = /\.mp4$/i.test(item.result_path);
               html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">查看</button>';
               html += '<a class="btn btn-ghost" href="' + item.result_path + '" target="_blank">新窗口打开</a>';
-              html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + '.html">下载</a>';
+              html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + (isVideo ? '.mp4' : '.html') + '">下载' + (isVideo ? ' MP4' : ' HTML') + '</a>';
             }
             if (item.status === 'failed') {
               html += '<button type="button" class="btn btn-primary btn-retry" data-task-id="' + item.task_id + '">断点重试</button>';
@@ -559,7 +589,7 @@
             if (data.status === 'success') {
               showStatus('生成成功', 'success');
               hideProgress();
-              var resultUrl = data.result_url || ('/results/' + taskId + '.html');
+              var resultUrl = data.result_url || ('/results/' + taskId + (currentOutputFormat === 'video' ? '.mp4' : '.html'));
               showResult(resultUrl);
               submitBtn.disabled = false; submitImageBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
@@ -582,6 +612,9 @@
     }
 
     function doSubmit(formData) {
+      var format = outputFormatEl.value || 'html';
+      formData.append('output_format', format);
+      currentOutputFormat = format;
       submitBtn.disabled = true; submitImageBtn.disabled = true;
       playerEl.style.display = 'none';
       var hasImage = formData.has('image');

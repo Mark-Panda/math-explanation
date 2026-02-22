@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     # 示例："教科书风格、极简、白底；动画以淡入和滑入为主，避免花哨效果"
     animation_style: str = ""
 
+    # ---------- Tutor 视频流水线（Manim）----------
+    manim_command: str = "manim"
+    """Manim 可执行命令（或绝对路径），用于渲染视频。"""
+    manim_self_heal_max_attempts: int = 3
+    """Manim 渲染失败时 LLM 自愈最大重试次数。"""
+    manim_scene_class: str = "MathScene"
+    """要渲染的 Manim 场景类名（tutor 流水线）。"""
+    manim_quality: str = "qh"
+    """Manim 渲染质量：ql=480p, qm=720p30, qh=1080p60, qk=4K。"""
+
 
 def get_settings() -> Settings:
     return Settings()

@@ -1,4 +1,5 @@
-"""流水线编排：题目分析 → 脚本生成 → TTS+时长 → 时长注入+HTML渲染 → 完成。支持断点检查点，失败重试时从当前步骤继续。"""
+"""流水线编排：题目分析 → 脚本生成 → TTS+时长 → 时长注入+HTML渲染 → 完成。支持断点检查点，失败重试时从当前步骤继续。
+另提供 run_tutor_pipeline：按 /tutor 技能的 8 步逻辑生成 Manim 视频。"""
 import logging
 from pathlib import Path
 from typing import Callable
@@ -13,6 +14,11 @@ from api.pipeline_checkpoint import (
     clear_checkpoint,
     load_checkpoint,
     save_step_checkpoint,
+)
+from api.tutor_checkpoint import (
+    clear_tutor_checkpoint,
+    load_tutor_checkpoint,
+    save_tutor_step,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,3 +149,135 @@ def run_pipeline(
         clear_checkpoint(work)
         return final_html_file
     raise RuntimeError("流水线未执行到 HTML 渲染步骤且无成品文件")
+
+
+# ---------- Tutor 流水线（/tutor 技能逻辑）----------
+
+PIPELINE_STEPS_TUTOR = [
+    "数学分析(tutor)",
+    "HTML 可视化",
+    "分镜脚本",
+    "TTS 与时长",
+    "验证音频",
+    "脚手架",
+    "Manim 实现",
+    "检查与渲染",
+]
+
+
+def run_tutor_pipeline(
+    problem_text: str,
+    output_dir: str | Path,
+    *,
+    image_base64: str | None = None,
+    image_mime_type: str = "image/jpeg",
+    on_step_start: Callable[[int, str], None] | None = None,
+    force_restart: bool = False,
+) -> Path:
+    """
+    按 /tutor 技能逻辑执行：数学分析 → HTML 可视化 → 分镜 → TTS → 验证 → 脚手架 → Manim 实现 → 检查与渲染。
+    返回最终视频文件路径（output_dir / "animation.mp4"）。
+    """
+    from tutor_pipeline.stages import (
+        analyze_math_tutor,
+        check_script_has_required,
+        generate_html_visualization,
+        generate_scaffold,
+        generate_storyboard,
+        generate_tts_from_storyboard,
+        implement_script,
+        render_tutor_video,
+        validate_audio,
+    )
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    work = output_dir / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    audio_dir = work / "audio"
+
+    def _step(i: int, name: str) -> None:
+        if on_step_start:
+            on_step_start(i, name)
+        logger.info("[tutor_pipeline] 阶段 %d/%d %s…", i + 1, len(PIPELINE_STEPS_TUTOR), name)
+
+    last_done, math_analysis, html_content, storyboard_md, audio_info, scaffold_code, full_script = load_tutor_checkpoint(work)
+    start_step = 0
+    if not force_restart and last_done >= 0:
+        start_step = last_done + 1
+        logger.info("[tutor_pipeline] 从检查点恢复，从步骤 %s 继续", PIPELINE_STEPS_TUTOR[start_step - 1] if start_step else "无")
+
+    # 0: 数学分析
+    if start_step <= 0:
+        _step(0, PIPELINE_STEPS_TUTOR[0])
+        math_analysis = analyze_math_tutor(
+            problem_text,
+            image_base64=image_base64,
+            image_mime_type=image_mime_type,
+        )
+        save_tutor_step(work, 0, math_analysis=math_analysis)
+
+    if not math_analysis or not math_analysis.strip():
+        raise ValueError("数学分析结果不可用")
+
+    # 1: HTML 可视化
+    if start_step <= 1:
+        _step(1, PIPELINE_STEPS_TUTOR[1])
+        html_content = generate_html_visualization(math_analysis)
+        save_tutor_step(work, 1, html_content=html_content)
+
+    if not html_content or not html_content.strip():
+        raise ValueError("HTML 可视化结果不可用")
+
+    # 2: 分镜脚本
+    if start_step <= 2:
+        _step(2, PIPELINE_STEPS_TUTOR[2])
+        storyboard_md = generate_storyboard(math_analysis, html_content)
+        save_tutor_step(work, 2, storyboard_md=storyboard_md)
+
+    if not storyboard_md or not storyboard_md.strip():
+        raise ValueError("分镜脚本结果不可用")
+
+    # 3: TTS 与时长
+    if start_step <= 3:
+        _step(3, PIPELINE_STEPS_TUTOR[3])
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        _, audio_info = generate_tts_from_storyboard(storyboard_md, audio_dir)
+        save_tutor_step(work, 3, audio_info=audio_info)
+
+    if not audio_info or not audio_info.files:
+        raise ValueError("TTS 结果不可用（无音频清单）")
+
+    # 4: 验证音频
+    if start_step <= 4:
+        _step(4, PIPELINE_STEPS_TUTOR[4])
+        validate_audio(audio_dir, audio_info)
+
+    # 5: 脚手架
+    if start_step <= 5 and (not scaffold_code or not scaffold_code.strip()):
+        _step(5, PIPELINE_STEPS_TUTOR[5])
+        scaffold_code = generate_scaffold(audio_info, audio_dir)
+        save_tutor_step(work, 4, scaffold_code=scaffold_code)
+
+    if not scaffold_code or not scaffold_code.strip():
+        raise ValueError("脚手架结果不可用")
+
+    # 6: Manim 实现
+    if start_step <= 6 and (not full_script or not full_script.strip()):
+        _step(6, PIPELINE_STEPS_TUTOR[6])
+        full_script = implement_script(scaffold_code, storyboard_md, audio_info, math_analysis=math_analysis)
+        save_tutor_step(work, 5, full_script=full_script)
+
+    if not full_script or not full_script.strip():
+        raise ValueError("Manim 脚本结果不可用")
+
+    # 7: 检查与渲染
+    _step(7, PIPELINE_STEPS_TUTOR[7])
+    errs = check_script_has_required(full_script)
+    if errs:
+        raise ValueError("脚本检查未通过: " + ", ".join(errs))
+    output_mp4 = output_dir / "animation.mp4"
+    render_tutor_video(full_script, audio_dir, audio_info, output_mp4)
+    clear_tutor_checkpoint(work)
+    logger.info("[tutor_pipeline] 视频已生成 %s", output_mp4)
+    return output_mp4

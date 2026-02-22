@@ -21,6 +21,7 @@ class HistoryRecord:
     video_path: Optional[str] = None
     error: Optional[str] = None
     current_step: Optional[str] = None  # 当前执行步骤，供断点重试时前端展示
+    output_format: str = "html"  # html | video，供断点重试时选择流水线
     created_at: str = ""
     updated_at: str = ""
 
@@ -60,6 +61,8 @@ def init_db() -> None:
         columns = [row[1] for row in cur.fetchall()]
         if "current_step" not in columns:
             conn.execute("ALTER TABLE history ADD COLUMN current_step TEXT")
+        if "output_format" not in columns:
+            conn.execute("ALTER TABLE history ADD COLUMN output_format TEXT DEFAULT 'html'")
         conn.commit()
     finally:
         conn.close()
@@ -74,6 +77,7 @@ def _row_to_record(row: sqlite3.Row) -> HistoryRecord:
         video_path=row["video_path"],
         error=row["error"],
         current_step=row["current_step"] if "current_step" in row.keys() else None,
+        output_format=row["output_format"] if "output_format" in row.keys() else "html",
         created_at=row["created_at"] or "",
         updated_at=row["updated_at"] or "",
     )
@@ -88,6 +92,7 @@ def create_record(
     task_id: str,
     problem_preview: str = "",
     problem_text: Optional[str] = None,
+    output_format: str = "html",
 ) -> None:
     """创建一条待处理历史记录。"""
     init_db()
@@ -95,14 +100,15 @@ def create_record(
     preview = (problem_preview or "").strip()[:PREVIEW_MAX] or (
         (problem_text or "").strip()[:PREVIEW_MAX] if problem_text else "[图片上传]"
     )
+    fmt = "video" if (output_format or "").strip() == "video" else "html"
     conn = _get_conn()
     try:
         conn.execute(
             """
-            INSERT INTO history (task_id, problem_text, problem_preview, status, video_path, error, created_at, updated_at)
-            VALUES (?, ?, ?, 'pending', NULL, NULL, ?, ?)
+            INSERT INTO history (task_id, problem_text, problem_preview, status, video_path, error, output_format, created_at, updated_at)
+            VALUES (?, ?, ?, 'pending', NULL, NULL, ?, ?, ?)
             """,
-            (task_id, problem_text, preview, now, now),
+            (task_id, problem_text, preview, fmt, now, now),
         )
         conn.commit()
     finally:
