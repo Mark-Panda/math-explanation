@@ -157,8 +157,7 @@ uv sync
 - `problem_analysis/`：题目理解与 steps schema；图片识别、公式验证、题目分析（含各 prompt 常量）
 - `script_generation/`：两阶段脚本生成（动画方案 + 每步 JS 代码），产出 HTML 片段与 image_prompts
 - `asset_generation/`：TTS、时长注入、HTML 动画校验与渲染（含自愈）、SD 占位
-- `composition/`：FFmpeg 音频拼接/视频合成（当前主流程为 HTML 动画，此模块为 Manim 视频流程预留）
-- `api/`：流水线编排（HTML / Tutor 视频）、任务存储、FastAPI 路由
+ `api/`：流水线编排（HTML / Tutor 视频）、任务存储、FastAPI 路由
 - `tutor_pipeline/`：/tutor 技能服务端实现（数学分析、HTML 可视化、分镜、TTS、脚手架、Manim 实现、渲染）
 - `config.py`：pydantic-settings 配置
 - `llm_runner.py`：LangChain 可复用 LLM 调用（结构化/纯文本/多模态）

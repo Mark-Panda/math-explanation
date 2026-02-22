@@ -146,7 +146,7 @@ def fix_tutor_script_with_llm(bad_code: str, error_msg: str) -> str:
 {bad_code}
 ```
 
-要求：保留 MathScene 类与 construct/play_scene 结构；使用 Manim Community Edition 兼容写法（虚线用 DashedLine 或 DashedVMobject，不要给 Line 传 dash_length）。只输出修复后的完整代码。"""
+要求：保留 MathScene 类与 construct/play_scene 结构；使用 Manim Community Edition 兼容写法（虚线用 DashedLine 或 DashedVMobject，不要给 Line 传 dash_length）。字幕放在固定区域（如画面下方），同一时间只保留一句，新字幕前先 FadeOut 上一句；图形标签用 .next_to 放在元素外侧，避免文字重叠。只输出修复后的完整代码。"""
     return invoke_plain(prompt)
 
 

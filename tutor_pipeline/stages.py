@@ -344,6 +344,7 @@ IMPLEMENT_SCRIPT_PROMPT = """你是一位 Manim 动画工程师。请根据以�
 5. 全部用 Text，不用 MathTex（避免 LaTeX 依赖）。
 6. 只输出完整 Python 代码，不要解释。类名保持 MathScene；脚本同目录下会有 audio 文件夹和 audio_info.json，__init__ 中已加载。
 7. **Manim Community Edition 兼容**：虚线必须用 DashedLine(start, end) 或 DashedVMobject(line)，不要给 Line() 传 dash_length、dash_ratio 等参数（Line 不接受这些，会报 TypeError）。
+8. **避免文字重叠**：所有字幕/标题使用固定区域（如画面下方 1/4 处），同一时间只保留当前句字幕，新字幕出现前先 FadeOut 或 Uncreate 上一句；图形上的标签用 .next_to(点/线, direction) 或 .shift() 放在对应元素外侧，避免标签之间、标签与字幕重叠；多段文字不要同时放在画面中央。
 
 数学事实分析（供几何计算参考）：
 {math_analysis}
