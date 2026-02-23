@@ -115,7 +115,15 @@ def render_manim_video(code_string: str, output_file: str | Path) -> None:
         mp4s = list(media.rglob("*.mp4"))
         if not mp4s:
             raise RuntimeError("Manim 未生成 mp4 文件")
-        shutil.copy(str(mp4s[0]), str(out_path))
+        out_path = out_path.resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dest = out_path.parent / (out_path.name + ".tmp")
+        shutil.copy(str(mp4s[0]), str(tmp_dest))
+        if not tmp_dest.exists():
+            raise RuntimeError(f"复制视频失败，临时文件不存在: {tmp_dest}")
+        tmp_dest.replace(out_path)
+        if not out_path.exists():
+            raise RuntimeError(f"复制视频失败，目标不存在: {out_path}")
 
 
 def fix_code_with_llm(bad_code: str, error_msg: str) -> str:
@@ -134,9 +142,36 @@ def fix_code_with_llm(bad_code: str, error_msg: str) -> str:
     return invoke_plain(prompt)
 
 
+def _extract_syntax_error_highlight(error_msg: str) -> str:
+    """若错误信息中含 SyntaxError，提取首段「行号 + 问题行」并置顶，便于 LLM 优先看到。"""
+    import re
+    m = re.search(
+        r"File [^\n]+script\.py\", line (\d+)\s*\n\s*(.+?)(?:\n\s*\^)?",
+        error_msg,
+        re.DOTALL,
+    )
+    syn = re.search(r"SyntaxError:\s*([^\n]+)", error_msg)
+    if m and syn:
+        line_no, line_content = m.group(1), (m.group(2) or "").strip()[:120]
+        return f"【关键】SyntaxError: {syn.group(1).strip()}\n  出错行号: {line_no}\n  该行内容: {line_content}\n\n完整错误:\n"
+    return ""
+
+
 def fix_tutor_script_with_llm(bad_code: str, error_msg: str) -> str:
     """Tutor 脚本渲染失败时，用 LLM 修复后返回新代码。要求保留 MathScene、Manim CE 兼容。"""
+    highlight = _extract_syntax_error_highlight(error_msg)
+    if highlight:
+        error_msg = highlight + error_msg
+    # 错误过长时保留开头（含可能的【关键】）与末尾，避免挤占 token
+    err_max = 4000
+    if len(error_msg) > err_max:
+        head = error_msg[:600] if highlight else ""
+        tail = error_msg[-err_max:]
+        error_msg = (head + "\n...(中段堆栈省略)...\n" + tail) if head else "(前段省略)\n...\n" + tail
     prompt = f"""这段 Manim 脚本运行报错，请修复后只返回完整可运行的 Python 代码，不要解释。
+
+**提前示意**：若错误信息中出现 "Manim 渲染失败 (exit 1)" 且堆栈含 get_module、scene_classes_from_file、_run_module_as_main 等，说明是**加载脚本文件时**出错，真正原因通常在堆栈**最后几行**（如 SyntaxError、IndentationError、NameError、未定义 MathScene 等）。请重点看报错末尾的异常类型与文件名/行号，据此修改脚本（补全 import、修正语法、确保 class MathScene(Scene) 存在且无拼写错误）。
+**坐标超出范围**：若报错为 AssertionError 且提示「x坐标超出范围」或「y坐标超出范围」或「建议缩放」，请在 calculate_geometry() 末尾对所有 geometry["points"] 中的点（及 lines/circles 若为点构成）做统一缩放与平移：先收集所有点的 x、y，算出 min_x,max_x, min_y,max_y，若超出 [-7,7]×[-4,4] 则取 scale = min(6/max(abs(min_x),abs(max_x)), 3.5/max(abs(min_y),abs(max_y)), 1)，再对每个点的坐标 (x,y,z) 做 (x*scale, y*scale, 0) 并可选平移使居中，确保返回的 geometry 满足 assert_geometry 的画布范围；或直接按报错中的「建议缩放0.8倍」在 calculate_geometry 内对所有点坐标乘以 0.8（或相应系数）后再返回。
 
 错误信息:
 {error_msg}
@@ -146,7 +181,7 @@ def fix_tutor_script_with_llm(bad_code: str, error_msg: str) -> str:
 {bad_code}
 ```
 
-要求：保留 MathScene 类与 construct/play_scene 结构；使用 Manim Community Edition 兼容写法（虚线用 DashedLine 或 DashedVMobject，不要给 Line 传 dash_length）。字幕放在固定区域（如画面下方），同一时间只保留一句，新字幕前先 FadeOut 上一句；图形标签用 .next_to 放在元素外侧，避免文字重叠。只输出修复后的完整代码。"""
+要求：保留 MathScene 类与 construct/play_scene 结构；使用 Manim Community Edition 兼容写法（虚线用 DashedLine 或 DashedVMobject，不要给 Line 传 dash_length）。辅助线必须用 calculate_geometry() 中已计算好的点作为 DashedLine 的端点，不可随意设坐标。字幕放在固定区域（如画面下方），同一时间只保留一句，新字幕前先 FadeOut 上一句；图形标签用 .next_to 放在元素外侧，避免文字重叠。若涉及图形被裁切或未完全显示，将主图形放入 VGroup 后按外接范围 scale 与 move_to(ORIGIN)，确保整图在画面 x∈[-7,7]、y∈[-4,4] 内且居中。只输出修复后的完整代码。"""
     return invoke_plain(prompt)
 
 
@@ -184,11 +219,12 @@ def render_manim_script(
     quality: str | None = None,
     audio_dir: str | Path | None = None,
     audio_info_dict: dict | None = None,
-) -> None:
+) -> Path:
     """
     Tutor 流水线用：渲染给定脚本代码，使用指定场景类名与质量。
     script_code 写入临时目录的 script.py；若提供 audio_dir，会复制到临时目录 audio/，
     并写入 audio_info.json，以便脚本内 Path(__file__).parent / "audio" 与 audio_info.json 可用。
+    返回实际写入的 mp4 文件路径（与 output_file 解析后的路径一致）。
     """
     import shutil
     import subprocess
@@ -240,4 +276,13 @@ def render_manim_script(
         mp4s = list(media.rglob("*.mp4"))
         if not mp4s:
             raise RuntimeError("Manim 未生成 mp4 文件")
-        shutil.copy(str(mp4s[0]), str(out_path))
+        out_path = out_path.resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dest = out_path.parent / (out_path.name + ".tmp")
+        shutil.copy(str(mp4s[0]), str(tmp_dest))
+        if not tmp_dest.exists():
+            raise RuntimeError(f"复制视频失败，临时文件不存在: {tmp_dest}")
+        tmp_dest.replace(out_path)
+        if not out_path.exists():
+            raise RuntimeError(f"复制视频失败，目标不存在: {out_path}")
+        return out_path

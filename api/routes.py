@@ -65,8 +65,16 @@ def _run_pipeline_task_retry(task_id: str) -> None:
                 on_step_start=on_step_start,
                 force_restart=False,
             )
+            result_path = Path(result_path).resolve()
+            if not result_path.exists():
+                set_failed(
+                    task_id,
+                    f"视频已生成但文件不存在: {result_path}，请检查 output 目录或重试",
+                )
+                return
             dest = RESULTS_DIR / f"{task_id}.mp4"
             import shutil
+            RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             shutil.copy(str(result_path), str(dest))
             set_success(task_id, f"/results/{task_id}.mp4")
             logger.info("[retry] task_id=%s 视频重试成功 path=%s", task_id, dest)

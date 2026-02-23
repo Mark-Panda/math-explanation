@@ -42,6 +42,8 @@ class Settings(BaseSettings):
 
     # TTS（edge-tts 音色名，建议在 .env 中显式设置，整批步骤会固定使用该音色）
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    # 主音色 NoAudioReceived 时尝试的备用音色，为空则不尝试
+    tts_voice_fallback: str = "zh-CN-YunxiNeural"
 
     # 自愈：HTML 动画代码校验失败时 LLM 修复的最大重试次数
     html_self_heal_max_attempts: int = 3

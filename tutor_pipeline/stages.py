@@ -1,4 +1,5 @@
 """Tutor 流水线各阶段：数学分析 → HTML 可视化 → 分镜 → TTS → 验证 → 脚手架 → 实现 → 检查渲染。"""
+import ast
 import json
 import re
 from datetime import datetime
@@ -42,6 +43,7 @@ MATH_ANALYSIS_PROMPT = """你是一位数学专家。请分析以下数学题目
 - 点的坐标: ...
 - 边的关系: ...
 - 圆/弧的定义: ...
+- **辅助线**：若有垂线、角平分线、中线等，必须写明每条辅助线的端点/垂足/交点如何由已知点与几何关系确定（例如：过 D 作 BC 的垂线垂足为 E，则 E 在 BC 上且 DE ⟂ BC，可用向量投影求 E 的坐标；角平分线与对边的交点可按边长比例计算）。便于后续动画中辅助线位置正确。
 
 ### 需要证明的结论
 - 结论1: ...
@@ -70,6 +72,7 @@ MATH_ANALYSIS_PROMPT_WITH_IMAGE = """你是一位数学专家。请结合题目�
 - 点的坐标: ...
 - 边的关系: ...
 - 圆/弧的定义: ...
+- **辅助线**：若有垂线、角平分线、中线等，必须写明每条辅助线的端点/垂足/交点如何由已知点与几何关系确定（例如：垂足在直线上且满足垂直；角平分线与对边交点按比例）。以图片中辅助线的实际位置为准。
 
 ### 需要证明的结论
 - 结论1: ...
@@ -216,7 +219,13 @@ async def generate_tts_from_storyboard_async(
             durations.append(default_dur)
             entries.append(AudioInfoEntry(scene=scene_num, file=file_name, duration=default_dur))
             continue
-        dur = await generate_audio_with_duration_async(text, out_path, voice=voice)
+        try:
+            dur = await generate_audio_with_duration_async(text, out_path, voice=voice)
+        except Exception as e:
+            logger.exception("[TTS] 生成失败 幕=%s 文件=%s", scene_num, file_name)
+            raise RuntimeError(
+                f"TTS 生成失败（幕 {scene_num}，文件 {file_name}）：{e}"
+            ) from e
         durations.append(dur)
         entries.append(AudioInfoEntry(scene=scene_num, file=file_name, duration=dur))
 
@@ -337,14 +346,16 @@ def generate_scaffold(audio_info: AudioInfo, audio_dir: str | Path) -> str:
 IMPLEMENT_SCRIPT_PROMPT = """你是一位 Manim 动画工程师。请根据以下数学分析、分镜脚本和 audio_info，将给定的 script.py 脚手架补全为可运行的完整代码。
 
 要求：
-1. calculate_geometry() 必须根据数学分析和分镜完整实现（点、线、圆等，z 坐标均为 0）。
-2. assert_geometry() 验证题目条件（边长、中点、直角等）及画布范围，用中文报错。
+1. calculate_geometry() 必须根据数学分析和分镜完整实现（点、线、圆等，z 坐标均为 0）。**辅助线（垂线、角平分线、中线等）的端点、垂足、与边的交点必须按几何关系在代码中计算得出**（例如：垂足 E = 点 D 在直线 BC 上的投影，可用向量点积求投影点；角平分线与对边交点可按边长比例或定比分点公式计算），不得随意写死坐标，否则辅助线位置会错。
+2. assert_geometry() 验证题目条件（边长、中点、直角等）、**辅助线的几何关系**（如垂足在直线上、垂线垂直、角平分线过顶点等）及画布范围，用中文报错。
 3. 每幕 play_scene 第一行必须 self.add_sound(str(self._audio_dir / audio_file))，动画时长 >= 音频时长。
 4. 读白提到什么就高亮什么；字幕需有退场（分镜中 → 或 退场）。
 5. 全部用 Text，不用 MathTex（避免 LaTeX 依赖）。
 6. 只输出完整 Python 代码，不要解释。类名保持 MathScene；脚本同目录下会有 audio 文件夹和 audio_info.json，__init__ 中已加载。
-7. **Manim Community Edition 兼容**：虚线必须用 DashedLine(start, end) 或 DashedVMobject(line)，不要给 Line() 传 dash_length、dash_ratio 等参数（Line 不接受这些，会报 TypeError）。
+7. **Manim Community Edition 兼容**：虚线必须用 DashedLine(start, end) 或 DashedVMobject(line)，不要给 Line() 传 dash_length、dash_ratio 等参数（Line 不接受这些，会报 TypeError）。**辅助线（如垂线 DE）必须用 geometry 中已计算好的点**（如 geometry["points"]["E"]、geometry["points"]["D"]）作为 DashedLine 的端点，不可在 play_scene 里重新设点，否则位置会错。
 8. **避免文字重叠**：所有字幕/标题使用固定区域（如画面下方 1/4 处），同一时间只保留当前句字幕，新字幕出现前先 FadeOut 或 Uncreate 上一句；图形上的标签用 .next_to(点/线, direction) 或 .shift() 放在对应元素外侧，避免标签之间、标签与字幕重叠；多段文字不要同时放在画面中央。
+9. **图形完整显示**：Manim 默认画面范围约 x∈[-7.1, 7.1]、y∈[-4, 4]。**必须在 calculate_geometry() 内使所有点的坐标落在 [-6, 6]×[-3.5, 3.5] 内（留边距）**，避免 assert_geometry 时因边界等于 ±7/±4 或浮点误差导致 AssertionError（如「y坐标超出范围[0, 4.8]」）。做法：在 calculate_geometry 末尾根据所有点的 min_x,max_x,min_y,max_y 计算缩放系数 scale 与平移量，对 geometry["points"] 中每个点统一缩放并平移至中心后再返回；或一开始就用保守的缩放（如 0.8）与原点居中。assert_geometry() 中做画布范围检查时用中文报错并给出建议缩放/平移量。
+10. **括号与语法**：所有 self.play(...)、Write(...)、FadeOut(...) 等调用必须括号成对，勿漏写闭合的 )，例如 self.play(Write(obj), run_time=1) 不能写成 run_time=0 后缺 )；每行括号、方括号、花括号都要成对闭合。
 
 数学事实分析（供几何计算参考）：
 {math_analysis}
@@ -409,19 +420,37 @@ def render_tutor_video(
     output_mp4: Path,
     *,
     scene_class: str | None = None,
-) -> None:
+) -> Path:
     """
     调用 Manim 渲染；失败时用 LLM 修复脚本后重试（最多 MANIM_SELF_HEAL_MAX_ATTEMPTS 次）。
+    返回实际写入的 mp4 文件路径。
     """
     from asset_generation import manim_render
 
     settings = get_settings()
-    max_attempts = getattr(settings, "manim_self_heal_max_attempts", 3)
+    max_attempts = max(1, int(getattr(settings, "manim_self_heal_max_attempts", 3)))
     current_code = script_code
     last_error: str | None = None
     for attempt in range(max_attempts):
         try:
-            manim_render.render_manim_script(
+            # 渲染前先做语法检查，SyntaxError 时用简洁错误信息让 LLM 修复，避免长堆栈干扰
+            try:
+                ast.parse(current_code)
+            except SyntaxError as syn_err:
+                err_text = f"SyntaxError: {syn_err.msg}\n  行 {syn_err.lineno}: {syn_err.text or ''}"
+                if syn_err.offset is not None and syn_err.text:
+                    err_text += f"\n  该行第 {syn_err.offset} 个字符附近有误，请补全括号或修正语法。"
+                logger.info("[tutor] 脚本语法错误，尝试 LLM 修复 (第 %d 次)… %s", attempt + 1, err_text[:200])
+                current_code = manim_render.fix_tutor_script_with_llm(current_code, err_text)
+                if not (current_code and current_code.strip()):
+                    raise RuntimeError("LLM 未返回有效脚本代码")
+                if "```python" in current_code:
+                    current_code = re.sub(r"^```python\s*\n?", "", current_code)
+                if "```" in current_code:
+                    current_code = re.sub(r"\n?```\s*$", "", current_code)
+                current_code = current_code.strip()
+                continue
+            written = manim_render.render_manim_script(
                 current_code,
                 output_mp4,
                 scene_class=scene_class or settings.manim_scene_class,
@@ -429,7 +458,7 @@ def render_tutor_video(
                 audio_dir=Path(audio_dir),
                 audio_info_dict=audio_info.model_dump(),
             )
-            return
+            return written
         except FileNotFoundError:
             raise
         except Exception as e:
@@ -448,3 +477,6 @@ def render_tutor_video(
             if "```" in current_code:
                 current_code = re.sub(r"\n?```\s*$", "", current_code)
             current_code = current_code.strip()
+    raise RuntimeError(
+        f"Manim 渲染未产生输出，最后错误: {last_error or '未知'}"
+    )

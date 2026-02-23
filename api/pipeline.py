@@ -276,8 +276,21 @@ def run_tutor_pipeline(
     errs = check_script_has_required(full_script)
     if errs:
         raise ValueError("脚本检查未通过: " + ", ".join(errs))
-    output_mp4 = output_dir / "animation.mp4"
-    render_tutor_video(full_script, audio_dir, audio_info, output_mp4)
+    output_mp4 = (output_dir / "animation.mp4").resolve()
+    result_mp4 = render_tutor_video(full_script, audio_dir, audio_info, output_mp4)
+    if result_mp4 is None:
+        clear_tutor_checkpoint(work)
+        raise RuntimeError("视频渲染未返回路径（内部错误，请检查 MANIM_SELF_HEAL_MAX_ATTEMPTS）")
+    result_mp4 = result_mp4.resolve()
+    if not result_mp4.exists():
+        clear_tutor_checkpoint(work)
+        try:
+            listing = ", ".join(p.name for p in output_dir.iterdir()) or "(空)"
+        except OSError:
+            listing = "(无法列出)"
+        raise RuntimeError(
+            f"视频已渲染但文件不存在: {result_mp4}；output_dir 内容: {listing}"
+        )
     clear_tutor_checkpoint(work)
-    logger.info("[tutor_pipeline] 视频已生成 %s", output_mp4)
-    return output_mp4
+    logger.info("[tutor_pipeline] 视频已生成 %s", result_mp4)
+    return result_mp4

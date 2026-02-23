@@ -25,8 +25,57 @@ async def generate_audio_with_duration_async(
     out.parent.mkdir(parents=True, exist_ok=True)
     if voice is None:
         voice = get_settings().tts_voice
-    communicate = edge_tts.Communicate(text.strip(), voice)
-    await communicate.save(str(out))
+    text_clean = text.strip()
+    delays = [1.0, 2.0, 4.0]
+    fallback_voice = (get_settings().tts_voice_fallback or "").strip() or None
+    if fallback_voice == voice:
+        fallback_voice = None
+    last_err: Exception | None = None
+
+    for voice_choice in [voice, fallback_voice] if fallback_voice else [voice]:
+        if voice_choice is None:
+            continue
+        for attempt in range(len(delays) + 1):
+            try:
+                communicate = edge_tts.Communicate(text_clean, voice_choice)
+                await communicate.save(str(out))
+                last_err = None
+                if attempt > 0 or voice_choice != voice:
+                    logger.info(
+                        "[TTS] 使用%s音色 %s 成功",
+                        "备用" if voice_choice != voice else "重试",
+                        voice_choice,
+                    )
+                break
+            except Exception as e:
+                last_err = e
+                no_audio = (
+                    getattr(e, "__class__", type(e)).__name__ == "NoAudioReceived"
+                    or "no audio" in str(e).lower()
+                )
+                if no_audio and attempt < len(delays):
+                    await asyncio.sleep(delays[attempt])
+                    continue
+                if no_audio and voice_choice == voice and fallback_voice:
+                    logger.warning(
+                        "[TTS] 主音色 %s 未收到音频，将尝试备用音色 %s",
+                        voice,
+                        fallback_voice,
+                    )
+                    break
+                if no_audio:
+                    snippet = (text_clean[:100] + "…") if len(text_clean) > 100 else text_clean
+                    raise RuntimeError(
+                        f"TTS 未收到音频。请检查：1) .env 中 TTS_VOICE 是否为有效音色（如 zh-CN-XiaoxiaoNeural），可运行 edge-tts --list-voices 查看；"
+                        f"2) 文本是否过长或含不支持的字符。当前音色={voice_choice!r}，文本片段={snippet!r}"
+                    ) from e
+                raise
+        else:
+            continue
+        if last_err is None:
+            break
+    if last_err is not None:
+        raise last_err
     default_sec = get_settings().default_wait_seconds
 
     def _duration_via_ffprobe() -> float | None:

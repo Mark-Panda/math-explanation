@@ -43,6 +43,8 @@ VISION_REQUEST_TIMEOUT=300
 
 # ========== TTS ==========
 TTS_VOICE=zh-CN-XiaoxiaoNeural
+# 主音色 NoAudioReceived 时尝试的备用音色，可留空
+TTS_VOICE_FALLBACK=zh-CN-YunxiNeural
 
 # ========== 自愈、时长与动画风格 ==========
 HTML_SELF_HEAL_MAX_ATTEMPTS=3
