@@ -188,6 +188,7 @@ def run_tutor_pipeline(
         implement_script,
         render_tutor_video,
         validate_audio,
+        _inject_add_sound_if_missing,
     )
 
     output_dir = Path(output_dir)
@@ -273,6 +274,7 @@ def run_tutor_pipeline(
 
     # 7: 检查与渲染
     _step(7, PIPELINE_STEPS_TUTOR[7])
+    full_script = _inject_add_sound_if_missing(full_script)
     errs = check_script_has_required(full_script)
     if errs:
         raise ValueError("脚本检查未通过: " + ", ".join(errs))
