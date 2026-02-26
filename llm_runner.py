@@ -2,14 +2,14 @@
 import json
 import logging
 import re
-from typing import Literal, TypeVar
+from typing import Callable, Literal, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from config import get_settings
+from config import get_llm_model_list, get_settings, get_vision_model_list
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,37 @@ def get_vision_model(
     return ChatOpenAI(**kwargs)
 
 
+def _with_model_fallback_and_retry(
+    model_list: list[str],
+    retries_per_model: int,
+    invoke_fn: Callable[[str], T],
+) -> T:
+    """
+    按模型列表顺序调用 invoke_fn(model)，同一模型失败则重试 retries_per_model 次，再换下一个模型。
+    全部失败则抛出最后一次异常。
+    """
+    last_error: BaseException | None = None
+    for model_idx, model in enumerate(model_list):
+        if model_idx > 0:
+            logger.info("[LLM] 切换至下一模型 (%d/%d): %s", model_idx + 1, len(model_list), model)
+        for attempt in range(1, retries_per_model + 1):
+            try:
+                return invoke_fn(model)
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "[LLM] 模型 %s 第 %d/%d 次失败（失败满 %d 次将切换下一模型）: %s",
+                    model,
+                    attempt,
+                    retries_per_model,
+                    retries_per_model,
+                    e,
+                )
+    if last_error is None:
+        raise RuntimeError("模型列表为空")
+    raise last_error
+
+
 def invoke_structured(
     prompt: str,
     schema: type[T],
@@ -218,27 +249,39 @@ def invoke_structured(
     model: str | None = None,
     timeout: float | None = None,
 ) -> T:
-    """调用 LLM 并解析为 Pydantic 模型。供题目分析、脚本生成等复用。"""
+    """调用 LLM 并解析为 Pydantic 模型。供题目分析、脚本生成等复用。支持多模型列表与每模型重试。"""
     logger.info("[LLM] invoke_structured 请求 schema=%s prompt_len=%d", schema.__name__, len(prompt))
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    llm = get_chat_model(model=model, timeout=timeout)
-    result = _invoke_and_parse(llm, prompt, schema)
-    out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
-    logger.info("[LLM] invoke_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
-    logger.info("[LLM] response: %s", _truncate_for_log(out_str))
-    return result
+    s = get_settings()
+    models = [model] if model else get_llm_model_list()
+
+    def do(m: str) -> T:
+        llm = get_chat_model(model=m, timeout=timeout)
+        result = _invoke_and_parse(llm, prompt, schema)
+        out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
+        logger.info("[LLM] invoke_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
+        logger.info("[LLM] response: %s", _truncate_for_log(out_str))
+        return result
+
+    return _with_model_fallback_and_retry(models, s.llm_retry_per_model, do)
 
 
 def invoke_plain(prompt: str, *, model: str | None = None) -> str:
-    """调用 LLM 返回纯文本（用于代码自愈等）。"""
+    """调用 LLM 返回纯文本（用于代码自愈等）。支持多模型列表与每模型重试。"""
     logger.info("[LLM] invoke_plain 请求 prompt_len=%d", len(prompt))
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    llm = get_chat_model(model=model)
-    msg = llm.invoke([HumanMessage(content=prompt)])
-    content = msg.content if hasattr(msg, "content") else str(msg)
-    logger.info("[LLM] invoke_plain 响应 response_len=%d", len(content))
-    logger.info("[LLM] response: %s", _truncate_for_log(content))
-    return content
+    s = get_settings()
+    models = [model] if model else get_llm_model_list()
+
+    def do(m: str) -> str:
+        llm = get_chat_model(model=m)
+        msg = llm.invoke([HumanMessage(content=prompt)])
+        content = msg.content if hasattr(msg, "content") else str(msg)
+        logger.info("[LLM] invoke_plain 响应 response_len=%d", len(content))
+        logger.info("[LLM] response: %s", _truncate_for_log(content))
+        return content
+
+    return _with_model_fallback_and_retry(models, s.llm_retry_per_model, do)
 
 
 def invoke_multimodal_plain(
@@ -254,31 +297,53 @@ def invoke_multimodal_plain(
     多模态大模型调用，返回纯文本。请求时区分是文字还是图片：
     - content_type="text"：使用文本模型，content 为文本，需传 text
     - content_type="image"：使用视觉模型，content 为图片+提示，需传 image_base64
+    支持多模型列表与每模型重试。
     """
-    # 图片走视觉模型，纯文本走文本模型
-    llm = get_vision_model(model=model) if content_type == "image" else get_chat_model(model=model)
     if content_type == "text":
         if text is None or text == "":
             raise ValueError("content_type 为 text 时需提供 text")
-        content: str | list = f"{prompt}\n\n{text}" if (prompt and prompt.strip()) else text
-        logger.info("[LLM] invoke_multimodal_plain 请求 content_type=text prompt_len=%d text_len=%d", len(prompt), len(text or ""))
-        logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-        logger.info("[LLM] text: %s", _truncate_for_log(text or ""))
     else:
         if not image_base64:
             raise ValueError("content_type 为 image 时需提供 image_base64")
-        url = f"data:{image_mime_type};base64,{image_base64}"
-        content = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": url}},
-        ]
-        logger.info("[LLM] invoke_multimodal_plain 请求 content_type=image prompt_len=%d image_base64_len=%d", len(prompt), len(image_base64))
-        logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    msg = llm.invoke([HumanMessage(content=content)])
-    out = msg.content if hasattr(msg, "content") else str(msg)
-    logger.info("[LLM] invoke_multimodal_plain 响应 response_len=%d", len(out))
-    logger.info("[LLM] response: %s", _truncate_for_log(out))
-    return out
+
+    s = get_settings()
+    models = [model] if model else (
+        get_vision_model_list() if content_type == "image" else get_llm_model_list()
+    )
+    retries = (
+        (s.vision_retry_per_model if s.vision_retry_per_model is not None else s.llm_retry_per_model)
+        if content_type == "image"
+        else s.llm_retry_per_model
+    )
+
+    def do(m: str) -> str:
+        llm = get_vision_model(model=m) if content_type == "image" else get_chat_model(model=m)
+        if content_type == "text":
+            content: str | list = f"{prompt}\n\n{text}" if (prompt and prompt.strip()) else text
+            logger.info("[LLM] invoke_multimodal_plain 请求 content_type=text prompt_len=%d text_len=%d", len(prompt), len(text or ""))
+            logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
+            logger.info("[LLM] text: %s", _truncate_for_log(text or ""))
+        else:
+            url = f"data:{image_mime_type};base64,{image_base64}"
+            content = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": url}},
+            ]
+            logger.info("[LLM] invoke_multimodal_plain 请求 content_type=image prompt_len=%d image_base64_len=%d", len(prompt), len(image_base64))
+            logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
+        msg = llm.invoke([HumanMessage(content=content)])
+        out = msg.content if hasattr(msg, "content") else str(msg)
+        out = (out or "").strip()
+        logger.info("[LLM] invoke_multimodal_plain 响应 response_len=%d", len(out))
+        logger.info("[LLM] response: %s", _truncate_for_log(out))
+        if not out:
+            raise ValueError(
+                "视觉/多模态模型返回内容为空（HTTP 200 但无文本）。"
+                "请检查网关或模型配置（如 base_url、model、max_tokens），或查看网关日志。"
+            )
+        return out
+
+    return _with_model_fallback_and_retry(models, retries, do)
 
 
 def invoke_vision_plain(
@@ -310,28 +375,40 @@ def invoke_multimodal_structured(
     """
     多模态结构化输出：同时传入文本提示与可选图片，返回 Pydantic 模型。
     当 image_base64 不为空时，使用视觉模型，content 为 [text, image_url]；
-    否则使用文本模型，退化为纯文本结构化调用。
+    否则使用文本模型，退化为纯文本结构化调用。支持多模型列表与每模型重试。
     """
     logger.info(
         "[LLM] invoke_multimodal_structured 请求 schema=%s prompt_len=%d has_image=%s",
         schema.__name__, len(prompt), bool(image_base64),
     )
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    # 有图片走视觉模型，纯文本走文本模型
-    if image_base64:
-        llm = get_vision_model(model=model, timeout=timeout)
-    else:
-        llm = get_chat_model(model=model, timeout=timeout)
-    if image_base64:
-        url = f"data:{image_mime_type};base64,{image_base64}"
-        content: str | list = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": url}},
-        ]
-    else:
-        content = prompt
-    result = _invoke_and_parse(llm, content, schema)
-    out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
-    logger.info("[LLM] invoke_multimodal_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
-    logger.info("[LLM] response: %s", _truncate_for_log(out_str))
-    return result
+    s = get_settings()
+    models = [model] if model else (
+        get_vision_model_list() if image_base64 else get_llm_model_list()
+    )
+    retries = (
+        (s.vision_retry_per_model if s.vision_retry_per_model is not None else s.llm_retry_per_model)
+        if image_base64
+        else s.llm_retry_per_model
+    )
+
+    def do(m: str) -> T:
+        if image_base64:
+            llm = get_vision_model(model=m, timeout=timeout)
+        else:
+            llm = get_chat_model(model=m, timeout=timeout)
+        if image_base64:
+            url = f"data:{image_mime_type};base64,{image_base64}"
+            content: str | list = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": url}},
+            ]
+        else:
+            content = prompt
+        result = _invoke_and_parse(llm, content, schema)
+        out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
+        logger.info("[LLM] invoke_multimodal_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
+        logger.info("[LLM] response: %s", _truncate_for_log(out_str))
+        return result
+
+    return _with_model_fallback_and_retry(models, retries, do)

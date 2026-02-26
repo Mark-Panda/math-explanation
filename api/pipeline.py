@@ -267,10 +267,15 @@ def run_tutor_pipeline(
     if start_step <= 6 and (not full_script or not full_script.strip()):
         _step(6, PIPELINE_STEPS_TUTOR[6])
         full_script = implement_script(scaffold_code, storyboard_md, audio_info, math_analysis=math_analysis)
-        save_tutor_step(work, 5, full_script=full_script)
+        if full_script and full_script.strip():
+            save_tutor_step(work, 5, full_script=full_script)
+        else:
+            raise ValueError("Manim 脚本生成返回为空，请检查 LLM 配置或模型（可配置 LLM_MODELS 多模型重试）")
 
     if not full_script or not full_script.strip():
-        raise ValueError("Manim 脚本结果不可用")
+        raise ValueError(
+            "Manim 脚本结果不可用（内容为空）。若为断点恢复，请删除 .tutor_checkpoint 后重试；或检查脚本生成步骤的模型与超时。"
+        )
 
     # 7: 检查与渲染
     _step(7, PIPELINE_STEPS_TUTOR[7])

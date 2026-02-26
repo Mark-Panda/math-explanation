@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     """API 基础 URL，可选。用于代理或自定义端点（如 Azure、国内中转）。"""
     llm_model: str = "gpt-4o"
     """文本模型名称，用于脚本生成、代码自愈等纯文本任务。"""
+    llm_models: str | None = None
+    """多个文本模型，逗号分隔（如 model_a,model_b）。不设则仅使用 llm_model；设置后按顺序尝试，一个失败则换下一个，每个模型重试 llm_retry_per_model 次。"""
+    llm_retry_per_model: int = 3
+    """每个模型的最大重试次数，失败后切换下一个模型。"""
     llm_temperature: float = 0.2
     """生成温度，0~2，越低越稳定，越高越随机。题目分析与代码生成建议 0.1~0.3。"""
     llm_max_tokens: int | None = None
@@ -33,6 +37,10 @@ class Settings(BaseSettings):
     """视觉模型 API 基础 URL，不设则使用 openai_base_url。"""
     vision_model: str | None = None
     """视觉模型名称（如 gpt-4o、claude-sonnet-4-5），用于图片识别、带图分析等多模态任务。不设则使用 llm_model。"""
+    vision_models: str | None = None
+    """多个视觉模型，逗号分隔。不设则仅使用 vision_model/llm_model；设置后按顺序尝试，每个模型重试 llm_retry_per_model 次。"""
+    vision_retry_per_model: int | None = None
+    """视觉模型每个模型的最大重试次数，不设则使用 llm_retry_per_model。"""
     vision_temperature: float | None = None
     """视觉模型生成温度，不设则使用 llm_temperature。"""
     vision_max_tokens: int | None = None
@@ -68,3 +76,19 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_llm_model_list(settings: Settings | None = None) -> list[str]:
+    """文本模型列表：若配置了 llm_models（逗号分隔）则解析为列表，否则为 [llm_model]。"""
+    s = settings or get_settings()
+    if s.llm_models and s.llm_models.strip():
+        return [m.strip() for m in s.llm_models.split(",") if m.strip()]
+    return [s.llm_model]
+
+
+def get_vision_model_list(settings: Settings | None = None) -> list[str]:
+    """视觉模型列表：若配置了 vision_models 则解析为列表，否则为 [vision_model 或 llm_model]。"""
+    s = settings or get_settings()
+    if s.vision_models and s.vision_models.strip():
+        return [m.strip() for m in s.vision_models.split(",") if m.strip()]
+    return [s.vision_model or s.llm_model]

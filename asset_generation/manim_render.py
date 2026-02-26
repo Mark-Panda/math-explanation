@@ -163,18 +163,12 @@ def fix_tutor_script_with_llm(bad_code: str, error_msg: str) -> str:
     if highlight:
         error_msg = highlight + error_msg
     # 错误过长时保留开头（含可能的【关键】）与末尾，避免挤占 token
-    err_max = 4000
+    err_max = 40000
     if len(error_msg) > err_max:
         head = error_msg[:600] if highlight else ""
         tail = error_msg[-err_max:]
         error_msg = (head + "\n...(中段堆栈省略)...\n" + tail) if head else "(前段省略)\n...\n" + tail
     prompt = f"""这段 Manim 脚本运行报错，请修复后只返回完整可运行的 Python 代码，不要解释。
-
-**提前示意**：若错误信息中出现 "Manim 渲染失败 (exit 1)" 且堆栈含 get_module、scene_classes_from_file、_run_module_as_main 等，说明是**加载脚本文件时**出错，真正原因通常在堆栈**最后几行**（如 SyntaxError、IndentationError、NameError、未定义 MathScene 等）。请重点看报错末尾的异常类型与文件名/行号，据此修改脚本（补全 import、修正语法、确保 class MathScene(Scene) 存在且无拼写错误）。
-**坐标超出范围**：若报错为 AssertionError 且提示「x坐标超出范围」或「y坐标超出范围」或「建议缩放」，请在 calculate_geometry() 末尾对所有 geometry["points"] 中的点（及 lines/circles 若为点构成）做统一缩放与平移：先收集所有点的 x、y，算出 min_x,max_x, min_y,max_y，若超出 [-7,7]×[-4,4] 则取 scale = min(6/max(abs(min_x),abs(max_x)), 3.5/max(abs(min_y),abs(max_y)), 1)，再对每个点的坐标 (x,y,z) 做 (x*scale, y*scale, 0) 并可选平移使居中，确保返回的 geometry 满足 assert_geometry 的画布范围；或直接按报错中的「建议缩放0.8倍」在 calculate_geometry 内对所有点坐标乘以 0.8（或相应系数）后再返回。
-**wait 时长必须为正**：若报错为 ValueError 且提示 "wait() has a duration of ... <= 0" 或 "duration must be a positive number"，请将脚本中所有 self.wait(...) 的实参改为恒为正数：用 max(0.5, duration) 或 max(0.5, duration - 已用时长) 替代 max(0, ...)，确保不会传入 0 或负数。
-**SyntaxError 括号未闭合**：若报错 "(' was never closed" 或 ")' was never closed" 且指向某一行（如「行 327」），请**只修改该行及相邻行**：在该行补全缺失的闭合括号 )，使 self.play(..., run_time=数字) 等调用括号成对，例如将 `self.play(FadeOut(...), FadeIn(...), run` 补全为 `self.play(FadeOut(...), FadeIn(...), run_time=1)`。不要重写整个文件，只修出错的那一行。
-**DashedLine/Line 坐标 shape (1,6)**：若报错 "could not broadcast input array from shape (1,6) into shape (1,3)" 且堆栈涉及 DashedLine 或 Line，说明传入的 start/end 是元组拼接结果（如 point + (0,1,0) 在 Python 中会变成 (x,y,z,0,1,0)）。请将 geometry["points"] 的点的加减改为 np.array(point) + (dx,dy,dz)，例如 DashedLine(np.array(geometry["points"]["零点-3"]) + (0,1,0), np.array(geometry["points"]["零点-3"]) + (0,-1,0))，并确保脚本有 import numpy as np。
 
 错误信息:
 {error_msg}

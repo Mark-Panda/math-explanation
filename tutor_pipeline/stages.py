@@ -162,13 +162,19 @@ def generate_storyboard(math_analysis: str, html_content: str) -> str:
 def _parse_audio_table_from_storyboard(storyboard_md: str) -> list[tuple[int, str, str]]:
     """
     从分镜 Markdown 中解析「## 音频生成清单」表格，返回 [(幕号, 文件名, 读白文本), ...]。
+    支持 ## / ### 标题；若无表格则从「### 第N幕」与「**读白**」回退提取。
     """
-    # 定位表格：## 音频生成清单 之后的第一个 |...| 块
+    lines = storyboard_md.splitlines()
+    # 1) 定位表格：## 或 ### 且含「音频」或「清单」的标题后的 |...| 块
     in_table = False
     rows: list[tuple[int, str, str]] = []
-    for line in storyboard_md.splitlines():
+    for line in lines:
         line_stripped = line.strip()
-        if line_stripped.startswith("## ") and "音频" in line_stripped:
+        is_audio_heading = (
+            (line_stripped.startswith("## ") or line_stripped.startswith("### "))
+            and ("音频" in line_stripped or "清单" in line_stripped)
+        )
+        if is_audio_heading:
             in_table = True
             continue
         if not in_table:
@@ -178,7 +184,6 @@ def _parse_audio_table_from_storyboard(storyboard_md: str) -> list[tuple[int, st
                 break
             continue
         parts = [p.strip() for p in line_stripped.split("|") if p.strip() != ""]
-        # 列顺序：幕号 | 文件名 | 读白文本 | 时长 | 说话人 | 情感
         if len(parts) >= 3:
             try:
                 scene_num = int(parts[0])
@@ -187,7 +192,35 @@ def _parse_audio_table_from_storyboard(storyboard_md: str) -> list[tuple[int, st
                 rows.append((scene_num, file_name, voiceover))
             except (ValueError, IndexError):
                 continue
-    return rows
+    if rows:
+        return rows
+
+    # 2) 回退：从「### 第N幕：xxx」与「**读白**：yyy」提取
+    fallback: list[tuple[int, str, str]] = []
+    current_num: int | None = None
+    current_title = ""
+    voiceover = ""
+    for line in lines:
+        line_stripped = line.strip()
+        m = re.match(r"^#+\s*第\s*(\d+)\s*幕\s*[：:]?\s*(.*)", line_stripped)
+        if m:
+            if current_num is not None and voiceover:
+                name = re.sub(r"[^\w\u4e00-\u9fff]+", "_", (current_title or str(current_num))[:30]).strip("_") or str(current_num)
+                fallback.append(
+                    (current_num, f"audio_{current_num:03d}_{name}.wav", voiceover.strip())
+                )
+            current_num = int(m.group(1))
+            current_title = (m.group(2) or "").strip().strip("：:")
+            voiceover = ""
+            continue
+        if current_num is not None and ("读白" in line_stripped or "**读白**" in line_stripped):
+            after_colon = re.sub(r"^\*?\*?读白\*?\*?\s*[：:]\s*", "", line_stripped).strip()
+            if after_colon:
+                voiceover = after_colon
+    if current_num is not None and voiceover:
+        name = re.sub(r"[^\w\u4e00-\u9fff]+", "_", (current_title or str(current_num))[:30]).strip("_") or str(current_num)
+        fallback.append((current_num, f"audio_{current_num:03d}_{name}.wav", voiceover.strip()))
+    return fallback
 
 
 async def generate_tts_from_storyboard_async(
@@ -204,7 +237,10 @@ async def generate_tts_from_storyboard_async(
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = _parse_audio_table_from_storyboard(storyboard_md)
     if not rows:
-        raise ValueError("分镜中未解析到音频生成清单表格，请确保包含「## 音频生成清单」及表头与数据行")
+        raise ValueError(
+            "分镜中未解析到音频生成清单。请确保：(1) 包含「## 音频生成清单」或「### 音频清单」及下方 Markdown 表格（幕号|文件名|读白文本|...），"
+            "或 (2) 每幕为「### 第N幕：标题」且含「**读白**：文本」以便回退解析。"
+        )
 
     voice = voice or get_settings().tts_voice
     durations: list[float] = []
@@ -381,39 +417,90 @@ def implement_script(
     *,
     math_analysis: str = "",
 ) -> str:
-    """步骤7：LLM 根据分镜与 audio_info 生成完整 script.py。"""
+    """步骤7：LLM 根据分镜与 audio_info 生成完整 script.py。走多模型重试与 script 超时。"""
+    from llm_runner import _with_model_fallback_and_retry
+    from config import get_llm_model_list, get_settings
+
     prompt = IMPLEMENT_SCRIPT_PROMPT.format(
         math_analysis=(math_analysis or "")[:4000],
         storyboard=storyboard_md[:8000],
         audio_info_json=audio_info.model_dump_json(indent=2),
         scaffold=scaffold[:6000],
     )
-    llm = get_chat_model(timeout=get_settings().llm_script_timeout)
-    msg = llm.invoke([HumanMessage(content=prompt)])
-    raw = msg.content if hasattr(msg, "content") else str(msg)
-    # 去掉可能的 markdown 代码块
-    if "```python" in raw:
-        raw = re.sub(r"^```python\s*\n?", "", raw)
-    if "```" in raw:
-        raw = re.sub(r"\n?```\s*$", "", raw)
-    return raw.strip()
+    s = get_settings()
+    models = get_llm_model_list()
+
+    def do(m: str) -> str:
+        llm = get_chat_model(model=m, timeout=s.llm_script_timeout)
+        msg = llm.invoke([HumanMessage(content=prompt)])
+        raw = msg.content if hasattr(msg, "content") else str(msg)
+        # 去掉可能的 markdown 代码块
+        if "```python" in raw:
+            raw = re.sub(r"^```python\s*\n?", "", raw)
+        if "```" in raw:
+            raw = re.sub(r"\n?```\s*$", "", raw)
+        out = raw.strip()
+        if not out:
+            raise ValueError("脚本生成模型返回内容为空")
+        return out
+
+    return _with_model_fallback_and_retry(models, s.llm_retry_per_model, do)
 
 
 # -------- 步骤 8：检查与渲染 --------
 
 
 def _inject_add_sound_if_missing(script_code: str) -> str:
-    """若脚本有 play_scene 但缺少 add_sound，在 play_scene 方法体首行注入 self.add_sound(...)。"""
-    if "add_sound" in script_code or "def play_scene" not in script_code:
+    """若脚本缺少 add_sound，在 play_scene 方法体首行注入；无 play_scene 则在 construct 首行注入。"""
+    if "add_sound" in script_code:
         return script_code
-    # 匹配 def play_scene(...): 后的换行及下一行缩进（参数可跨行）
-    match = re.search(r"(def play_scene\s*\([^)]*\)\s*:)\s*\n(\s+)", script_code, re.DOTALL)
-    if not match:
-        return script_code
-    indent = match.group(2)
-    line = indent + "self.add_sound(str(self._audio_dir / audio_file))\n"
-    pos = match.end()
-    return script_code[:pos] + line + script_code[pos:]
+    add_sound_line = "self.add_sound(str(self._audio_dir / audio_file))\n"
+
+    # 1) 有 play_scene：在方法体首行前注入
+    if "def play_scene" in script_code:
+        # 匹配 def play_scene(...): 后至下一行缩进（允许 ): 后带注释、空行）
+        match = re.search(
+            r"def play_scene\s*\([^)]*\)\s*:\s*(?:#.*?)?\s*\n\s*\n?(\s+)",
+            script_code,
+            re.DOTALL,
+        )
+        if not match:
+            # 回退：找 "def play_scene" 再找 "):" 再找换行与缩进
+            idx = script_code.find("def play_scene")
+            if idx != -1:
+                rest = script_code[idx:]
+                paren = rest.find("):")
+                if paren != -1:
+                    after_paren = rest[paren + 2 :]
+                    m = re.match(r"\s*\n+(\s*)", after_paren)
+                    if m:
+                        indent = m.group(1)
+                        insert_at = idx + paren + 2 + m.end()
+                        return (
+                            script_code[:insert_at]
+                            + indent
+                            + add_sound_line.strip()
+                            + "\n"
+                            + script_code[insert_at:]
+                        )
+        else:
+            indent = match.group(1)
+            pos = match.end()
+            return script_code[:pos] + indent + add_sound_line.strip() + "\n" + script_code[pos:]
+
+    # 2) 无 play_scene 但有 construct：在 construct 方法体首行前注入（满足检查项）
+    if "def construct" in script_code and "Scene" in script_code:
+        match = re.search(
+            r"def construct\s*\([^)]*\)\s*:\s*(?:#.*?)?\s*\n\s*\n?(\s+)",
+            script_code,
+            re.DOTALL,
+        )
+        if match:
+            indent = match.group(1)
+            pos = match.end()
+            return script_code[:pos] + indent + add_sound_line.strip() + "\n" + script_code[pos:]
+
+    return script_code
 
 
 def check_script_has_required(script_code: str) -> list[str]:

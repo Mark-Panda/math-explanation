@@ -7,8 +7,14 @@ OPENAI_API_KEY=xxxxx
 # 可选：自定义 API 基础 URL（代理、Azure、国内中转等）
 OPENAI_BASE_URL=xxxxx
 
-# 模型名称
+# 模型名称（单模型时使用）
 LLM_MODEL=doubao-seed-1-8-251228
+
+# 多模型：逗号分隔，按顺序尝试，一个失败换下一个，每个模型重试 LLM_RETRY_PER_MODEL 次
+# LLM_MODELS=claude-sonnet-4-5,kimi-k2.5,claude-opus-4-5-20251101
+
+# 每个模型的最大重试次数（默认 3）
+# LLM_RETRY_PER_MODEL=3
 
 # 生成温度（0~2，建议 0.1~0.3 更稳定）
 LLM_TEMPERATURE=0.2
@@ -31,6 +37,12 @@ VISION_BASE_URL=xxx
 
 # 视觉模型名称（不设则使用 LLM_MODEL）
 VISION_MODEL=doubao-seed-1-8-251228
+
+# 多视觉模型：逗号分隔，按顺序尝试，每个模型重试 VISION_RETRY_PER_MODEL 次（不设则用 LLM_RETRY_PER_MODEL）
+# VISION_MODELS=vision-a,vision-b
+
+# 视觉模型每个模型的最大重试次数（不设则使用 LLM_RETRY_PER_MODEL）
+# VISION_RETRY_PER_MODEL=3
 
 # 视觉模型温度（不设则使用 LLM_TEMPERATURE）
 VISION_TEMPERATURE=0.2
