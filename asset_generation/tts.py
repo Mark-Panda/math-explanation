@@ -1,4 +1,5 @@
 """TTS 生成语音并返回时长（秒）。同一批步骤固定使用同一音色，避免出现两种人声。"""
+import re
 import asyncio
 import logging
 from pathlib import Path
@@ -6,6 +7,23 @@ from pathlib import Path
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_markdown_for_tts(text: str) -> str:
+    """去掉旁白文本中的 Markdown 符号，避免 TTS 读出「星号」「乘号」等。"""
+    if not text or not text.strip():
+        return (text or "").strip()
+    s = text.strip()
+    # 去掉 **粗体**，保留中间文字
+    s = re.sub(r"\*\*([^*]*)\*\*", r"\1", s)
+    # 去掉 *斜体*，保留中间文字（避免误伤算式中的乘号，只匹配 *汉字/字母* 形式）
+    s = re.sub(r"\*([^*]+)\*", r"\1", s)
+    # 去掉残留的单独 ** 或 *
+    s = s.replace("**", "").replace("*", "")
+    # 去掉 `代码` 反引号，保留中间文字
+    s = re.sub(r"`([^`]*)`", r"\1", s)
+    s = s.replace("`", "")
+    return s.strip()
 
 
 async def generate_audio_with_duration_async(
@@ -25,7 +43,7 @@ async def generate_audio_with_duration_async(
     out.parent.mkdir(parents=True, exist_ok=True)
     if voice is None:
         voice = get_settings().tts_voice
-    text_clean = text.strip()
+    text_clean = _strip_markdown_for_tts(text)
     delays = [1.0, 2.0, 4.0]
     fallback_voice = (get_settings().tts_voice_fallback or "").strip() or None
     if fallback_voice == voice:
