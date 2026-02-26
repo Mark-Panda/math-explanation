@@ -298,6 +298,7 @@ def run_tutor_pipeline(
         raise RuntimeError(
             f"视频已渲染但文件不存在: {result_mp4}；output_dir 内容: {listing}"
         )
-    clear_tutor_checkpoint(work)
+    # clear_tutor_checkpoint(work)
+    # 成功后保留过程步骤内容（.tutor_checkpoint、audio 等），不删除
     logger.info("[tutor_pipeline] 视频已生成 %s", result_mp4)
     return result_mp4
