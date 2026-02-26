@@ -1,7 +1,29 @@
 """Manim 渲染与自愈：写临时文件、subprocess 调用、失败时 LLM 修复并重试。"""
+import re
 import sys
 import tempfile
 from pathlib import Path
+
+
+def _strip_manim_progress_log(text: str | None) -> str:
+    """
+    从 Manim 报错输出中移除进度条类日志（如 Animation N: ... : XX%|...| X/Y [..., it/s]），
+    避免这些非错误信息进入错误日志或传给 LLM。
+    """
+    if not text or not text.strip():
+        return text or ""
+    lines = text.splitlines()
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        # Manim 进度行：Animation 序号 + 动画描述 + 百分比 + 进度条 + it/s
+        if re.match(r"^Animation \d+:.+%\s*\|.+it/s\]\s*$", stripped):
+            continue
+        # 仅含百分比+进度条（无 it/s）的进度行
+        if re.match(r"^Animation \d+:.+%\s*\|", stripped):
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
 
 from config import get_settings
 from llm_runner import invoke_plain
@@ -109,7 +131,9 @@ def render_manim_video(code_string: str, output_file: str | Path) -> None:
             cwd=str(tmpdir),
         )
         if proc.returncode != 0:
-            raise RuntimeError(f"Manim 渲染失败 (exit {proc.returncode}): {proc.stderr or proc.stdout}")
+            raw_err = proc.stderr or proc.stdout or ""
+            err_text = _strip_manim_progress_log(raw_err) or raw_err
+            raise RuntimeError(f"Manim 渲染失败 (exit {proc.returncode}): {err_text}")
         # manim 输出到 <cwd>/media/videos/scene/720p30/SolutionScene.mp4 等
         media = tmpdir / "media" / "videos"
         mp4s = list(media.rglob("*.mp4"))
@@ -266,8 +290,10 @@ def render_manim_script(
             cwd=str(tmpdir),
         )
         if proc.returncode != 0:
+            raw_err = proc.stderr or proc.stdout or ""
+            err_text = _strip_manim_progress_log(raw_err) or raw_err
             raise RuntimeError(
-                f"Manim 渲染失败 (exit {proc.returncode}): {proc.stderr or proc.stdout}"
+                f"Manim 渲染失败 (exit {proc.returncode}): {err_text}"
             )
         media = tmpdir / "media" / "videos"
         mp4s = list(media.rglob("*.mp4"))
