@@ -140,7 +140,7 @@ def run_pipeline(
         render_html_with_self_heal(final_html_code, audio_dir, final_html_file, audio_prefix="step")
         logger.info("[pipeline] HTML 渲染完成 %s", final_html_file)
         save_step_checkpoint(work, 3, None)
-        clear_checkpoint(work)
+        # clear_checkpoint(work)
 
         # ---------- 可选：Remotion 渲染 MP4 ----------
         if get_settings().remotion_enabled and steps is not None:
@@ -164,6 +164,6 @@ def run_pipeline(
 
     final_html_file = output_dir / "animation.html"
     if final_html_file.exists():
-        clear_checkpoint(work)
+        # clear_checkpoint(work)
         return (final_html_file, steps, durations)
     raise RuntimeError("流水线未执行到 HTML 渲染步骤且无成品文件")

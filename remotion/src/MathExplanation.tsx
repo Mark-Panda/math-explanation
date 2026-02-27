@@ -1,9 +1,11 @@
 /**
  * 数学讲解 Composition：按步骤展示文案与公式，并同步播放 TTS 音频。
- * 实现遵循 remotion-dev/skills 的 compositions / sequencing / audio / animations 规则。
+ * 公式为 LaTeX 格式时使用 KaTeX 渲染；默认 Composition 无图形，需开启 REMOTION_GENERATE_CODE 使用生成组件以包含图形。
  */
 import { interpolate, Series, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { Audio } from "@remotion/media";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 
 export type StepInput = {
   stepId: number;
@@ -61,13 +63,30 @@ function StepSlide({
       {step.mathFormula ? (
         <div
           style={{
-            fontSize: 28,
-            fontWeight: 600,
             marginBottom: 16,
             textAlign: "center",
           }}
         >
-          {step.mathFormula.replace(/\$/g, "").trim() || "—"}
+          {(() => {
+            const raw = step.mathFormula.replace(/\$/g, "").trim();
+            if (!raw) return "—";
+            try {
+              const html = katex.renderToString(raw, {
+                throwOnError: false,
+                displayMode: true,
+                output: "html",
+              });
+              return (
+                <div
+                  className="katex-formula"
+                  dangerouslySetInnerHTML={{ __html: html }}
+                  style={{ fontSize: 28, fontWeight: 600 }}
+                />
+              );
+            } catch {
+              return <span style={{ fontSize: 28, fontWeight: 600 }}>{raw}</span>;
+            }
+          })()}
         </div>
       ) : null}
       <div style={{ fontSize: 18, lineHeight: 1.6, textAlign: "center", maxWidth: 640 }}>

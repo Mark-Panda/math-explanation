@@ -123,6 +123,8 @@ def _generate_plan(
     timeout = get_settings().llm_request_timeout  # 用普通请求超时，不需要脚本超时
     style_instruction = _style_instruction(animation_style)
 
+    # AnimationPlanOutput 含 shared_css/shared_svg 与多步方案，输出较长，需足够 max_tokens 避免截断
+    plan_max_tokens = 16384
     if image_base64:
         prompt = PLAN_PROMPT_WITH_IMAGE.format(steps_json=steps_json, animation_style_instruction=style_instruction)
         return invoke_multimodal_structured(
@@ -130,11 +132,12 @@ def _generate_plan(
             AnimationPlanOutput,
             image_base64=image_base64,
             image_mime_type=image_mime_type,
+            max_tokens=plan_max_tokens,
             timeout=timeout,
         )
     else:
         prompt = PLAN_PROMPT.format(steps_json=steps_json, animation_style_instruction=style_instruction)
-        return invoke_structured(prompt, AnimationPlanOutput, timeout=timeout)
+        return invoke_structured(prompt, AnimationPlanOutput, max_tokens=plan_max_tokens, timeout=timeout)
 
 
 def _generate_step_code(
@@ -170,6 +173,33 @@ def _generate_step_code(
     return result.animate_body
 
 
+def _extract_animate_body_from_step_code(raw: str) -> str:
+    """
+    若 LLM 返回的是 JSON（如完整 schema 或 {"animate_body": "..."}），
+    提取出真正的 JS 函数体，否则返回原字符串。
+    """
+    s = raw.strip()
+    if not s.startswith("{"):
+        return s
+    try:
+        obj = json.loads(s)
+        if not isinstance(obj, dict):
+            return s
+        # 直接有 animate_body（Pydantic 格式）
+        if "animate_body" in obj and isinstance(obj["animate_body"], str):
+            return obj["animate_body"].strip()
+        # schema 格式 properties.animate_body
+        props = obj.get("properties") or {}
+        ab = props.get("animate_body")
+        if isinstance(ab, str):
+            return ab.strip()
+        if isinstance(ab, dict) and "value" in ab and isinstance(ab["value"], str):
+            return ab["value"].strip()
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return s
+
+
 def _assemble_html(
     plan: AnimationPlanOutput,
     step_codes: list[str],
@@ -188,6 +218,8 @@ def _assemble_html(
     # 构建 stepAnimations 数组
     steps_js_items = []
     for i, code in enumerate(step_codes):
+        # 若为 JSON 包裹的 schema/animate_body，先提取出纯 JS
+        code = _extract_animate_body_from_step_code(code)
         # 清理可能的 markdown 代码块包裹
         clean_code = code.strip()
         if clean_code.startswith("```"):

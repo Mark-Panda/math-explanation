@@ -15,8 +15,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.9
 
-# 数学动画（需系统安装 ffmpeg 与 latex；manim 体积大，可按需安装）
-# manim>=0.18.0
+# 视频合成需系统安装 ffmpeg（主流程为 HTML + Remotion，无需 manim）
 
 # 可选：FFmpeg 封装（也可用 subprocess 直接调 ffmpeg）
 # ffmpeg-python>=0.2.0

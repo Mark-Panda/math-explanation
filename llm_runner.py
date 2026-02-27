@@ -120,9 +120,25 @@ def _invoke_and_parse(
     try:
         return schema.model_validate_json(extracted)
     except Exception as e:
-        # 部分模型对 StepCodeOutput 只返回代码块而非 JSON，将提取内容视为 animate_body
+        # 部分模型对 StepCodeOutput 返回代码块或错误结构的 JSON，尝试提取 animate_body
         if schema.__name__ == "StepCodeOutput" and extracted and extracted.strip():
             code = _strip_any_code_block(extracted)
+            # 若提取内容是 JSON（如 schema 或 {"animate_body":"..."}），尝试解析出 animate_body
+            if code.strip().startswith("{"):
+                try:
+                    obj = json.loads(code)
+                    if isinstance(obj, dict):
+                        ab = obj.get("animate_body")
+                        if isinstance(ab, str) and ab.strip():
+                            logger.info("[LLM] StepCodeOutput 从 JSON 中解析出 animate_body")
+                            return schema(animate_body=ab.strip())
+                        props = obj.get("properties") or {}
+                        ab = props.get("animate_body")
+                        if isinstance(ab, str) and ab.strip():
+                            logger.info("[LLM] StepCodeOutput 从 JSON properties 中解析出 animate_body")
+                            return schema(animate_body=ab.strip())
+                except (json.JSONDecodeError, TypeError):
+                    pass
             if code.strip():
                 logger.info("[LLM] StepCodeOutput 解析 JSON 失败，改为将提取内容作为 animate_body 使用")
                 return schema(animate_body=code)
@@ -193,12 +209,13 @@ def invoke_structured(
     schema: type[T],
     *,
     model: str | None = None,
+    max_tokens: int | None = None,
     timeout: float | None = None,
 ) -> T:
-    """调用 LLM 并解析为 Pydantic 模型。供题目分析、脚本生成等复用。"""
+    """调用 LLM 并解析为 Pydantic 模型。供题目分析、脚本生成等复用。max_tokens 不传则用配置中的 llm_max_tokens。"""
     logger.info("[LLM] invoke_structured 请求 schema=%s prompt_len=%d", schema.__name__, len(prompt))
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
-    llm = get_chat_model(model=model, timeout=timeout)
+    llm = get_chat_model(model=model, max_tokens=max_tokens, timeout=timeout)
     result = _invoke_and_parse(llm, prompt, schema)
     out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
     logger.info("[LLM] invoke_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
@@ -282,12 +299,14 @@ def invoke_multimodal_structured(
     image_base64: str | None = None,
     image_mime_type: str = "image/jpeg",
     model: str | None = None,
+    max_tokens: int | None = None,
     timeout: float | None = None,
 ) -> T:
     """
     多模态结构化输出：同时传入文本提示与可选图片，返回 Pydantic 模型。
     当 image_base64 不为空时，使用视觉模型，content 为 [text, image_url]；
     否则使用文本模型，退化为纯文本结构化调用。
+    max_tokens 用于避免长 JSON（如 AnimationPlanOutput）被截断，不传则用配置中的 vision_max_tokens/llm_max_tokens。
     """
     logger.info(
         "[LLM] invoke_multimodal_structured 请求 schema=%s prompt_len=%d has_image=%s",
@@ -296,9 +315,9 @@ def invoke_multimodal_structured(
     logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
     # 有图片走视觉模型，纯文本走文本模型
     if image_base64:
-        llm = get_vision_model(model=model, timeout=timeout)
+        llm = get_vision_model(model=model, max_tokens=max_tokens, timeout=timeout)
     else:
-        llm = get_chat_model(model=model, timeout=timeout)
+        llm = get_chat_model(model=model, max_tokens=max_tokens, timeout=timeout)
     if image_base64:
         url = f"data:{image_mime_type};base64,{image_base64}"
         content: str | list = [

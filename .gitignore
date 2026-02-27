@@ -40,7 +40,6 @@ output/
 media/
 data/
 
-# Manim 临时与缓存（若在项目内生成）
 *.log
 
 # IDE / 编辑器

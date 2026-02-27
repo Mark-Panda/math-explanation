@@ -55,7 +55,7 @@ uv sync
 | `ANIMATION_STYLE`            | 可选。动画风格描述，注入脚本生成 prompt；为空则不追加 | 空                     |
 | `REMOTION_ENABLED`           | 为 true 时在 HTML 完成后用 Remotion 渲染 MP4（需 Node + remotion 依赖） | `false` |
 | `REMOTION_NODE_COMMAND`     | 执行 remotion/render.js 的 Node 可执行文件           | `node`  |
-| `REMOTION_GENERATE_CODE`    | 为 true 时用大模型 + Remotion skill 生成 TSX 网页动画代码，渲染时优先使用该组件 | `false` |
+| `REMOTION_GENERATE_CODE`    | 为 true 时用大模型 + Remotion skill 生成 TSX 网页动画代码，渲染时优先使用该组件；**默认 Composition 仅含步骤文案+公式+语音，无图形**，若需 MP4 中带图形需开启此项 | `false` |
 
 ---
 
@@ -153,7 +153,7 @@ cd remotion/player-host && npm install && npm run build && cd ../..
 - `script_generation/`：两阶段脚本生成（动画方案 + 每步 JS 代码），产出 HTML 片段与 image_prompts
 - `asset_generation/`：TTS、时长注入、HTML 动画校验与渲染（含自愈）、SD 占位
 - `remotion/`：Remotion 子项目（React 视频），流水线在开启 `REMOTION_ENABLED` 时调用其渲染 MP4；实现遵循 [remotion-dev/skills](https://github.com/remotion-dev/skills) 的 composition / sequencing / audio 等规则
-- `composition/`：FFmpeg 音频拼接/视频合成（当前主流程为 HTML 动画，此模块为 Manim 视频流程预留）
+- `composition/`：FFmpeg 视频与音频合成（通用工具，当前主流程为 HTML + Remotion）
 - `api/`：流水线编排、任务存储、FastAPI 路由
 - `config.py`：pydantic-settings 配置
 - `llm_runner.py`：LangChain 可复用 LLM 调用（结构化/纯文本/多模态）

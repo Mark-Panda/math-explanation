@@ -1,4 +1,4 @@
-"""使用 FFmpeg 将 Manim 视频与音频合成为最终 MP4。"""
+"""使用 FFmpeg 将视频与音频合成为最终 MP4（通用工具，当前主流程为 HTML + Remotion）。"""
 import subprocess
 from pathlib import Path
 
@@ -11,7 +11,7 @@ class CompositionError(RuntimeError):
 
 
 def compose_video(
-    manim_video_path: str | Path,
+    video_path: str | Path,
     audio_path: str | Path,
     output_path: str | Path,
 ) -> None:
@@ -19,7 +19,7 @@ def compose_video(
     校验两个输入文件存在后，调用 FFmpeg 合成：-c:v copy、-c:a aac、-shortest。
     若输入不存在或 FFmpeg 非零退出码，抛出 CompositionError。
     """
-    video_path = Path(manim_video_path)
+    video_path = Path(video_path)
     audio_path_p = Path(audio_path)
     out_path = Path(output_path)
     if not video_path.is_file():
