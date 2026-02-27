@@ -212,6 +212,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     var progressFill = document.getElementById('progress-fill');
     function getContainer() {{ return document.getElementById('animation-container'); }}
     var stepStrip = document.getElementById('step-strip');
+    var initialContainerHTML = '';
+    (function() {{ var c = getContainer(); if (c) initialContainerHTML = c.innerHTML; }})();  // 保存初始画面，供每步重新绘制时恢复
 
     totalStepsEl.textContent = totalSteps;
     if (totalSteps === 0) {{
@@ -265,7 +267,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (index >= totalSteps) index = totalSteps;
       currentStep = index;
       var c = getContainer();
-      if (c) c.innerHTML = '';
+      if (c) {{ c.innerHTML = initialContainerHTML || ''; }}  // 每步重新绘制：恢复初始画面
       for (var i = 0; i < totalSteps; i++) {{
         var a = document.getElementById('audio-step-' + i);
         if (a) {{ a.pause(); a.currentTime = 0; }}
@@ -300,9 +302,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         audio.play().catch(function() {{}});
       }}
 
-      // 执行动画（每次取 container，避免首屏未就绪）
+      // 每步重新绘制：先清空并恢复为初始画面，再执行本步动画（不叠加上一步内容）
       var c = getContainer();
       if (c) {{
+        c.innerHTML = initialContainerHTML || '';
         try {{
           step.animate(c);
         }} catch(e) {{
@@ -325,7 +328,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (currentStep >= totalSteps) {{
         currentStep = 0;
         var c = getContainer();
-        if (c) c.innerHTML = '';
+        if (c) c.innerHTML = initialContainerHTML || '';
       }}
       playStep(currentStep);
     }});
@@ -334,7 +337,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       playing = false;
       currentStep = 0;
       var c = getContainer();
-      if (c) c.innerHTML = '';
+      if (c) c.innerHTML = initialContainerHTML || '';
       for (var i = 0; i < totalSteps; i++) {{
         var audio = document.getElementById('audio-step-' + i);
         if (audio) {{ audio.pause(); audio.currentTime = 0; }}

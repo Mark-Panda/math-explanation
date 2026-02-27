@@ -89,6 +89,8 @@ STEP_CODE_PROMPT = """你是前端动画工程师。请为以下数学讲解步�
 - **不要**使用 window、document.body、alert 等全局操作
 - **不要**使用任何外部库
 - 只输出函数体代码，不要 function 声明
+- **每步均为重新绘制**：播放/切换步骤前会先把容器恢复为初始画面（仅含共享 SVG），再执行本步代码；本步只需在 container 上添加本步内容，不要依赖前面步骤添加的节点；用 container.querySelector('svg') 等前先判空
+- 字符串中含单引号或字体名（如 Comic Sans MS）时用双引号包裹或转义，避免解析错误；选择器勿用 .step2-* 等通配 class，用具体 class 或 [class^="step2-"]
 {animation_style_instruction}"""
 
 

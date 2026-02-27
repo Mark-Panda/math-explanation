@@ -55,3 +55,4 @@ data/
 .cache/
 .cursor/
 node_modules/
+remotion/public/audio/
