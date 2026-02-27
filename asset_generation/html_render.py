@@ -210,10 +210,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     var stepInfo = document.getElementById('step-info');
     var totalStepsEl = document.getElementById('total-steps');
     var progressFill = document.getElementById('progress-fill');
-    var container = document.getElementById('animation-container');
+    function getContainer() {{ return document.getElementById('animation-container'); }}
     var stepStrip = document.getElementById('step-strip');
 
     totalStepsEl.textContent = totalSteps;
+    if (totalSteps === 0) {{
+      var wrap = document.getElementById('animation-wrapper');
+      if (wrap) {{
+        var msg = document.createElement('p');
+        msg.style.cssText = 'padding:2rem;color:#57606a;text-align:center;';
+        msg.textContent = '暂无步骤数据，请重新生成动画。';
+        var ac = getContainer();
+        if (ac && ac.parentNode) ac.parentNode.insertBefore(msg, ac);
+      }}
+    }}
 
     function updateStepDots() {{
       if (!stepStrip) return;
@@ -254,13 +264,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (index < 0) index = 0;
       if (index >= totalSteps) index = totalSteps;
       currentStep = index;
-      if (container) container.innerHTML = '';
+      var c = getContainer();
+      if (c) c.innerHTML = '';
       for (var i = 0; i < totalSteps; i++) {{
         var a = document.getElementById('audio-step-' + i);
         if (a) {{ a.pause(); a.currentTime = 0; }}
       }}
-      if (index < totalSteps) {{
-        try {{ steps[index].animate(container); }} catch(e) {{ console.error('步骤 ' + (index + 1) + ' 动画执行出错:', e); }}
+      if (index < totalSteps && c) {{
+        try {{ steps[index].animate(c); }} catch(e) {{ console.error('步骤 ' + (index + 1) + ' 动画执行出错:', e); }}
         var a = document.getElementById('audio-step-' + index);
         if (a) a.play().catch(function() {{}});
       }}
@@ -289,11 +300,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         audio.play().catch(function() {{}});
       }}
 
-      // 执行动画
-      try {{
-        step.animate(container);
-      }} catch(e) {{
-        console.error('步骤 ' + (index + 1) + ' 动画执行出错:', e);
+      // 执行动画（每次取 container，避免首屏未就绪）
+      var c = getContainer();
+      if (c) {{
+        try {{
+          step.animate(c);
+        }} catch(e) {{
+          console.error('步骤 ' + (index + 1) + ' 动画执行出错:', e);
+        }}
       }}
 
       // 等待 duration 后播放下一步
@@ -310,7 +324,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     playBtn.addEventListener('click', function() {{
       if (currentStep >= totalSteps) {{
         currentStep = 0;
-        if (container) container.innerHTML = '';
+        var c = getContainer();
+        if (c) c.innerHTML = '';
       }}
       playStep(currentStep);
     }});
@@ -318,7 +333,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     resetBtn.addEventListener('click', function() {{
       playing = false;
       currentStep = 0;
-      if (container) container.innerHTML = '';
+      var c = getContainer();
+      if (c) c.innerHTML = '';
       for (var i = 0; i < totalSteps; i++) {{
         var audio = document.getElementById('audio-step-' + i);
         if (audio) {{ audio.pause(); audio.currentTime = 0; }}

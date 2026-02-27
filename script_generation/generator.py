@@ -6,6 +6,7 @@
 """
 import json
 import logging
+import re
 
 from config import get_settings
 from llm_runner import invoke_multimodal_structured, invoke_structured
@@ -177,6 +178,7 @@ def _extract_animate_body_from_step_code(raw: str) -> str:
     """
     若 LLM 返回的是 JSON（如完整 schema 或 {"animate_body": "..."}），
     提取出真正的 JS 函数体，否则返回原字符串。
+    JSON 解析失败时用正则从字符串中抽取 "animate_body" 的值，避免整段 JSON 被嵌入导致语法错误。
     """
     s = raw.strip()
     if not s.startswith("{"):
@@ -197,6 +199,22 @@ def _extract_animate_body_from_step_code(raw: str) -> str:
             return ab["value"].strip()
     except (json.JSONDecodeError, TypeError):
         pass
+
+    # 解析失败时用正则抽取 "animate_body" 后的字符串值，避免嵌入整段 JSON 产生 Unexpected token ':'
+    match = re.search(r'"animate_body"\s*:\s*"', s)
+    if match:
+        start = match.end()
+        i = start
+        while i < len(s):
+            if s[i] == "\\" and i + 1 < len(s):
+                i += 2
+                continue
+            if s[i] == '"':
+                candidate = s[start:i].replace("\\n", "\n").replace('\\"', '"').strip()
+                if len(candidate) > 20 and ("container" in candidate or "document" in candidate or "createElement" in candidate):
+                    return candidate
+                break
+            i += 1
     return s
 
 
@@ -228,13 +246,19 @@ def _assemble_html(
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             clean_code = "\n".join(lines)
+        # 用 JSON 编码后通过 new Function 注入，避免代码中的引号/括号/反引号等导致 "missing ) after argument list" 等语法错误
+        code_json = json.dumps(clean_code, ensure_ascii=False)
+        code_json = code_json.replace("</script>", "<\\/script>")
 
         steps_js_items.append(
             f"  {{\n"
             f"    duration: STEP_PLACEHOLDER,\n"
-            f"    animate: function(container) {{\n"
-            f"      {clean_code}\n"
-            f"    }}\n"
+            f"    animate: (function() {{\n"
+            f"      var __c = {code_json};\n"
+            f"      try {{ return new Function('container', __c); }} catch(e) {{\n"
+            f"        return function(container) {{ if (container && typeof console !== 'undefined') console.error('步骤代码解析失败:', e); }};\n"
+            f"      }}\n"
+            f"    }})()\n"
             f"  }}"
         )
 
