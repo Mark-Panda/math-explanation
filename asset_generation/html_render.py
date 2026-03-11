@@ -295,6 +295,20 @@ def _audio_files_to_elements(audio_dir: Path, prefix: str = "step") -> str:
     return "\n".join(elements)
 
 
+def _fix_html_locally(html_code: str) -> str:
+    """对常见问题进行轻量本地修复，避免不必要的 LLM 自愈调用。"""
+    cleaned = _strip_markdown_code_block(html_code)
+    # 补 window.stepAnimations 前缀
+    if "stepAnimations" in cleaned and "window.stepAnimations" not in cleaned:
+        cleaned = re.sub(r"\bstepAnimations\s*=", "window.stepAnimations =", cleaned)
+    # 补齐 script/style 标签
+    if cleaned.count("<script") != cleaned.count("</script>"):
+        cleaned += "\n</script>"
+    if cleaned.count("<style") != cleaned.count("</style>"):
+        cleaned += "\n</style>"
+    return cleaned
+
+
 def render_html_animation(
     animation_html: str,
     audio_dir: Path,
@@ -375,6 +389,7 @@ def render_html_with_self_heal(
     last_error: str | None = None
 
     for attempt in range(max_attempts):
+        current_html = _fix_html_locally(current_html)
         errors = validate_html_animation(current_html)
         if not errors:
             render_html_animation(current_html, audio_dir, output_file, audio_prefix=audio_prefix)

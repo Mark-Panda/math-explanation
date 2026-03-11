@@ -134,6 +134,22 @@
       padding: 0.5rem 1rem 0;
       font-size: 0.8rem;
       color: var(--text-muted);
+      white-space: pre-line;
+    }
+    .status-title {
+      font-weight: 600;
+      margin-bottom: 0.2rem;
+    }
+    .status-detail {
+      font-weight: 400;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+    }
+    .step-duration {
+      margin-left: auto;
+      font-size: 0.75rem;
+      color: var(--text-muted);
     }
     .progress-stepper {
       padding: 0.5rem 1rem 1rem;
@@ -377,6 +393,9 @@
     var historyEmptyEl = document.getElementById('history-empty');
 
     var ALL_STEPS_HTML = ['识别题目图片', '公式交叉验证', '题目分析', '网页动画脚本生成', 'TTS 与时长收集', '时长注入与 HTML 渲染'];
+    var stepDurations = {};
+    var lastCurrentStep = null;
+    var currentStepStartAt = null;
     var ALL_STEPS_VIDEO = ['数学分析(tutor)', 'HTML 可视化', '分镜脚本', 'TTS 与时长', '验证音频', '脚手架', 'Manim 实现', '检查与渲染'];
 
     imageEl.addEventListener('change', function() {
@@ -386,9 +405,13 @@
     var statusActionsEl = document.getElementById('status-actions');
     var btnRetryCurrentEl = document.getElementById('btn-retry-current');
 
-    function showStatus(text, type, retryTaskId) {
+    function showStatus(text, type, retryTaskId, detailText) {
       progressCardEl.classList.add('visible');
-      statusEl.textContent = text;
+      if (detailText) {
+        statusEl.innerHTML = '<div class="status-title">' + text + '</div><div class="status-detail">' + detailText + '</div>';
+      } else {
+        statusEl.textContent = text;
+      }
       statusEl.className = type || '';
       statusEl.style.display = 'block';
       if (type === 'success' || type === 'failed') {
@@ -412,6 +435,8 @@
       var steps = currentOutputFormat === 'video' ? ALL_STEPS_VIDEO : ALL_STEPS_HTML;
       var total = steps.length;
       var currentIndex = currentStep ? steps.indexOf(currentStep) : -1;
+      var now = Date.now();
+      var currentElapsed = currentStepStartAt ? Math.max(0, (now - currentStepStartAt) / 1000) : null;
       if (currentIndex < 0) {
         progressBarEl.classList.add('indeterminate');
         progressBarEl.style.width = '';
@@ -420,7 +445,11 @@
         progressBarEl.classList.remove('indeterminate');
         var pct = Math.round(((currentIndex + 1) / total) * 100);
         progressBarEl.style.width = pct + '%';
-        progressMetaEl.textContent = '第 ' + (currentIndex + 1) + ' 步，共 ' + total + ' 步 · ' + currentStep;
+        var metaText = '第 ' + (currentIndex + 1) + ' 步，共 ' + total + ' 步 · ' + currentStep;
+        if (currentElapsed != null) {
+          metaText += '\n当前阶段已用时 ' + formatSeconds(currentElapsed);
+        }
+        progressMetaEl.textContent = metaText;
       }
       progressStepsEl.innerHTML = steps.map(function(s, i) {
         var state = 'pending';
@@ -429,7 +458,10 @@
           else if (i === currentIndex) state = 'current';
         }
         var icon = state === 'done' ? '✓' : (state === 'current' ? '●' : '○');
-        return '<li class="' + state + '"><span class="step-icon">' + icon + '</span><span>' + s + '</span></li>';
+        var durationValue = stepDurations && stepDurations[i] != null ? stepDurations[i] : null;
+        var duration = durationValue != null ? formatSeconds(durationValue) : '';
+        var durationHtml = duration ? '<span class="step-duration">' + duration + '</span>' : '';
+        return '<li class="' + state + '"><span class="step-icon">' + icon + '</span><span>' + s + '</span>' + durationHtml + '</li>';
       }).join('');
     }
 
@@ -469,6 +501,15 @@
         if (sameDay) return '今天 ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
       } catch (e) { return iso; }
+    }
+
+    function formatSeconds(seconds) {
+      if (seconds == null || isNaN(seconds)) return '—';
+      var s = Math.max(0, seconds);
+      if (s < 60) return s.toFixed(1) + 's';
+      var mins = Math.floor(s / 60);
+      var rem = (s % 60).toFixed(1);
+      return mins + 'm ' + rem + 's';
     }
 
     function loadHistory() {
@@ -581,13 +622,24 @@
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (data.status === 'running' || data.status === 'pending') {
+              if (data.current_step && data.current_step !== lastCurrentStep) {
+                lastCurrentStep = data.current_step;
+                currentStepStartAt = Date.now();
+              }
+              if (!data.current_step && !lastCurrentStep) {
+                currentStepStartAt = Date.now();
+              }
+              stepDurations = data.step_durations || {};
               showStatus('生成中…', 'running');
-              showProgress(data.current_step || null);
+              showProgress(data.current_step || lastCurrentStep || null);
               setTimeout(check, 2000);
               return;
             }
             if (data.status === 'success') {
-              showStatus('生成成功', 'success');
+              stepDurations = data.step_durations || stepDurations || {};
+              var totalLabel = data.total_duration_ms ? ('\n总耗时 ' + formatSeconds(data.total_duration_ms / 1000)) : '';
+              showStatus('生成成功', 'success', null, totalLabel ? totalLabel.trim() : null);
+              showProgress(data.current_step || lastCurrentStep || null);
               hideProgress();
               var resultUrl = data.result_url || ('/results/' + taskId + (currentOutputFormat === 'video' ? '.mp4' : '.html'));
               showResult(resultUrl);
@@ -596,7 +648,10 @@
               return;
             }
             if (data.status === 'failed') {
-              showStatus('生成失败：' + (data.error || '未知错误'), 'failed', taskId);
+              var errorText = data.error || '未知错误';
+              var totalFail = data.total_duration_ms ? ('\n总耗时 ' + formatSeconds(data.total_duration_ms / 1000)) : '';
+              showStatus('生成失败', 'failed', taskId, (errorText + totalFail).trim());
+              showProgress(data.current_step || lastCurrentStep || null);
               hideProgress();
               submitBtn.disabled = false; submitImageBtn.disabled = false;
               if (typeof onDone === 'function') onDone();

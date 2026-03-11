@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from api.history_store import update_checkpoint
 from problem_analysis.schemas import StepItem
 from script_generation.schemas import ScriptGenerationOutput
 
@@ -117,6 +118,9 @@ def save_step_checkpoint(
     (cp_dir / MANIFEST_FILE).write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     logger.info("[checkpoint] 已保存步骤 %d 检查点", step_index)
 
+    task_id = work_dir.parent.name
+    update_checkpoint(task_id, html_step=step_index)
+
 
 def clear_checkpoint(work_dir: Path) -> None:
     """删除检查点目录（成功跑完全流程后可调用，或由调用方在「强制从头运行」时调用）。"""
@@ -125,3 +129,6 @@ def clear_checkpoint(work_dir: Path) -> None:
         import shutil
         shutil.rmtree(cp_dir, ignore_errors=True)
         logger.info("[checkpoint] 已清除检查点目录")
+    task_id = Path(work_dir).parent.name
+    update_checkpoint(task_id, html_step=-1)
+    update_checkpoint(task_id, tutor_step=-1)

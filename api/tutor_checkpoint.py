@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 
+from api.history_store import update_checkpoint
 from tutor_pipeline.schemas import AudioInfo
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,9 @@ def save_tutor_step(
     (cp / MANIFEST).write_text(json.dumps({"last_completed_step": step_index}, ensure_ascii=False), encoding="utf-8")
     logger.info("[tutor_checkpoint] 已保存 Tutor 步骤 %d", step_index)
 
+    task_id = work_dir.parent.name
+    update_checkpoint(task_id, tutor_step=step_index)
+
 
 def clear_tutor_checkpoint(work_dir: Path) -> None:
     """删除 Tutor 检查点目录。"""
@@ -111,3 +115,5 @@ def clear_tutor_checkpoint(work_dir: Path) -> None:
         import shutil
         shutil.rmtree(cp, ignore_errors=True)
         logger.info("[tutor_checkpoint] 已清除检查点目录")
+    task_id = Path(work_dir).parent.name
+    update_checkpoint(task_id, tutor_step=-1)

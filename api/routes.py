@@ -1,5 +1,7 @@
 """FastAPI 路由：POST /generate_video，GET /tasks/{task_id}，结果 HTML 动画静态或下载。"""
+import json
 import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
@@ -52,8 +54,12 @@ def _run_pipeline_task_retry(task_id: str) -> None:
     logger.info("[retry] 断点重试 task_id=%s output_format=%s", task_id, output_format)
     try:
         set_running(task_id)
+        started_at = time.monotonic()
+        step_started_at: dict[int, float] = {}
+        step_durations: dict[int, float] = {}
 
         def on_step_start(step_index: int, step_name: str) -> None:
+            step_started_at[step_index] = time.monotonic()
             set_progress(task_id, step_name)
 
         if output_format == "video":
@@ -65,6 +71,8 @@ def _run_pipeline_task_retry(task_id: str) -> None:
                 on_step_start=on_step_start,
                 force_restart=False,
             )
+            for idx, started in step_started_at.items():
+                step_durations[idx] = time.monotonic() - started
             result_path = Path(result_path).resolve()
             if not result_path.exists():
                 set_failed(
@@ -87,13 +95,23 @@ def _run_pipeline_task_retry(task_id: str) -> None:
                 on_step_start=on_step_start,
                 force_restart=False,
             )
+            for idx, started in step_started_at.items():
+                step_durations[idx] = time.monotonic() - started
             dest = RESULTS_DIR / f"{task_id}.html"
             import shutil
             shutil.copy(str(result_path), str(dest))
             set_success(task_id, f"/results/{task_id}.html")
             logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
+        total_ms = int((time.monotonic() - started_at) * 1000)
+        step_json = json.dumps(step_durations, ensure_ascii=False)
+        from api.history_store import update_status as history_update_status
+        history_update_status(task_id, "success", total_duration_ms=total_ms, step_durations_json=step_json)
     except Exception as e:
         logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
+        total_ms = int((time.monotonic() - started_at) * 1000)
+        step_json = json.dumps(step_durations, ensure_ascii=False) if step_durations else None
+        from api.history_store import update_status as history_update_status
+        history_update_status(task_id, "failed", total_duration_ms=total_ms, step_durations_json=step_json)
         set_failed(task_id, str(e))
 
 
@@ -114,6 +132,9 @@ def _run_pipeline_task(
 
     try:
         set_running(task_id)
+        started_at = time.monotonic()
+        step_started_at: dict[int, float] = {}
+        step_durations: dict[int, float] = {}
 
         # ---------- 有图片：OCR → 公式验证 → 保留 base64 ----------
         if image_bytes:
@@ -156,6 +177,7 @@ def _run_pipeline_task(
         logger.info("[generate] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
 
         def on_step_start(step_index: int, step_name: str) -> None:
+            step_started_at[step_index] = time.monotonic()
             set_progress(task_id, step_name)
 
         # ---------- 执行流水线 ----------
@@ -167,6 +189,8 @@ def _run_pipeline_task(
                 image_mime_type=image_mime_type,
                 on_step_start=on_step_start,
             )
+            for idx, started in step_started_at.items():
+                step_durations[idx] = time.monotonic() - started
             dest = RESULTS_DIR / f"{task_id}.mp4"
             import shutil
             shutil.copy(str(result_path), str(dest))
@@ -181,13 +205,23 @@ def _run_pipeline_task(
                 on_step_start=on_step_start,
                 animation_style=animation_style,
             )
+            for idx, started in step_started_at.items():
+                step_durations[idx] = time.monotonic() - started
             dest = RESULTS_DIR / f"{task_id}.html"
             import shutil
             shutil.copy(str(result_path), str(dest))
             set_success(task_id, f"/results/{task_id}.html")
             logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
+        total_ms = int((time.monotonic() - started_at) * 1000)
+        step_json = json.dumps(step_durations, ensure_ascii=False)
+        from api.history_store import update_status as history_update_status
+        history_update_status(task_id, "success", total_duration_ms=total_ms, step_durations_json=step_json)
     except Exception as e:
         logger.exception("[generate] task_id=%s 生成失败: %s", task_id, e)
+        total_ms = int((time.monotonic() - started_at) * 1000)
+        step_json = json.dumps(step_durations, ensure_ascii=False) if step_durations else None
+        from api.history_store import update_status as history_update_status
+        history_update_status(task_id, "failed", total_duration_ms=total_ms, step_durations_json=step_json)
         set_failed(task_id, str(e))
 
 
@@ -242,12 +276,21 @@ async def get_task_status(task_id: str):
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
+    record = history_get(task_id)
+    step_durations = None
+    if record and record.step_durations_json:
+        try:
+            step_durations = json.loads(record.step_durations_json)
+        except (TypeError, ValueError):
+            step_durations = None
     return TaskStatusResponse(
         task_id=task.task_id,
         status=task.status,
         result_url=task.result_path if task.status == "success" else None,
         error=task.error,
         current_step=task.current_step,
+        total_duration_ms=getattr(record, "total_duration_ms", None) if record else None,
+        step_durations=step_durations,
     )
 
 

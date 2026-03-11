@@ -17,6 +17,8 @@ class TaskStatusResponse(BaseModel):
     result_url: str | None = Field(None, description="成功时的结果 HTML 动画 URL（相对或绝对）")
     error: str | None = Field(None, description="失败时的错误信息")
     current_step: str | None = Field(None, description="当前执行步骤，用于前端进度显示")
+    total_duration_ms: int | None = Field(None, description="任务总耗时（毫秒）")
+    step_durations: dict[int, float] | None = Field(None, description="已完成步骤耗时（秒），key 为步骤索引")
 
 
 class HistoryItem(BaseModel):

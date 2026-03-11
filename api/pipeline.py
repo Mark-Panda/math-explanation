@@ -20,6 +20,7 @@ from api.tutor_checkpoint import (
     load_tutor_checkpoint,
     save_tutor_step,
 )
+from api.history_store import get_record as history_get_record
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,18 @@ def run_pipeline(
     durations: list[float] = []
 
     if not force_restart:
+        rec = history_get_record(output_dir.name)
+        db_last = rec.checkpoint_html_step if rec else None
+        if db_last is not None:
+            start_step = int(db_last) + 1
+            logger.info(
+                "[pipeline] DB 断点指示 last_step=%s，将从步骤 %d/%s 继续",
+                db_last,
+                start_step,
+                PIPELINE_STEPS[start_step - 1] if start_step else "无",
+            )
         last_done, steps_ck, script_ck, durations_ck = load_checkpoint(work)
-        if last_done >= 0 and steps_ck is not None:
+        if db_last is None and last_done >= 0 and steps_ck is not None:
             start_step = last_done + 1
             steps = steps_ck
             if script_ck is not None:
@@ -83,6 +94,13 @@ def run_pipeline(
             if durations_ck is not None:
                 durations = durations_ck
             logger.info("[pipeline] 从检查点恢复，从步骤 %d/%s 继续", start_step, PIPELINE_STEPS[start_step - 1] if start_step else "无")
+        elif db_last is not None and last_done >= 0 and steps_ck is not None:
+            steps = steps_ck
+            if script_ck is not None:
+                script_out = script_ck
+                animation_html = script_ck.animation_html
+            if durations_ck is not None:
+                durations = durations_ck
 
     audio_dir = work / "audio"
 
@@ -204,9 +222,21 @@ def run_tutor_pipeline(
 
     last_done, math_analysis, html_content, storyboard_md, audio_info, scaffold_code, full_script = load_tutor_checkpoint(work)
     start_step = 0
-    if not force_restart and last_done >= 0:
-        start_step = last_done + 1
-        logger.info("[tutor_pipeline] 从检查点恢复，从步骤 %s 继续", PIPELINE_STEPS_TUTOR[start_step - 1] if start_step else "无")
+    if not force_restart:
+        rec = history_get_record(output_dir.name)
+        db_last = rec.checkpoint_tutor_step if rec else None
+        if db_last is not None:
+            start_step = int(db_last) + 1
+            logger.info(
+                "[tutor_pipeline] DB 断点指示 last_step=%s，将从步骤 %s 继续",
+                db_last,
+                PIPELINE_STEPS_TUTOR[start_step - 1] if start_step else "无",
+            )
+        if db_last is None and last_done >= 0:
+            start_step = last_done + 1
+            logger.info("[tutor_pipeline] 从检查点恢复，从步骤 %s 继续", PIPELINE_STEPS_TUTOR[start_step - 1] if start_step else "无")
+        elif db_last is not None and last_done >= 0:
+            logger.info("[tutor_pipeline] 检查点文件可用，将继续使用文件内容")
 
     # 0: 数学分析
     if start_step <= 0:

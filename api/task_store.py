@@ -90,19 +90,21 @@ def update_task_problem(task_id: str, problem_text: str) -> None:
 
 
 def get_task(task_id: str) -> Optional[TaskState]:
-    """先查内存，未命中则从持久化历史恢复为 TaskState（无 current_step）。"""
+    """优先从持久化历史读取任务状态，内存仅作为镜像缓存。"""
+    rec = history_get_record(task_id)
+    if rec:
+        state = TaskState(
+            task_id=rec.task_id,
+            status=rec.status,
+            result_path=rec.video_path,
+            error=rec.error,
+            current_step=getattr(rec, "current_step", None),
+        )
+        _tasks[task_id] = state
+        return state
     if task_id in _tasks:
         return _tasks[task_id]
-    rec = history_get_record(task_id)
-    if not rec:
-        return None
-    return TaskState(
-        task_id=rec.task_id,
-        status=rec.status,
-        result_path=rec.video_path,
-        error=rec.error,
-        current_step=getattr(rec, "current_step", None),
-    )
+    return None
 
 
 def delete_task(task_id: str) -> None:

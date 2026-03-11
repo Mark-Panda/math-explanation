@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
     # 主音色 NoAudioReceived 时尝试的备用音色，为空则不尝试
     tts_voice_fallback: str = "zh-CN-YunxiNeural"
+    # TTS 并发上限
+    tts_concurrency: int = 4
 
     # 自愈：HTML 动画代码校验失败时 LLM 修复的最大重试次数
     html_self_heal_max_attempts: int = 3

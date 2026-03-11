@@ -2,7 +2,10 @@
 import json
 import logging
 import re
+import hashlib
 from typing import Callable, Literal, TypeVar
+
+from api.history_store import get_llm_cache, set_llm_cache
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -96,10 +99,41 @@ def _strip_any_code_block(text: str) -> str:
     return s
 
 
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _hash_content(content: str | list) -> str:
+    if isinstance(content, list):
+        return _hash_text(json.dumps(content, ensure_ascii=False, sort_keys=True))
+    return _hash_text(content)
+
+
+def _make_cache_key(
+    *,
+    model: str,
+    content: str | list,
+    schema: type[BaseModel] | None = None,
+    content_type: str = "text",
+    image_mime_type: str | None = None,
+) -> str:
+    schema_name = schema.__name__ if schema else "plain"
+    payload = {
+        "model": model,
+        "schema": schema_name,
+        "content_type": content_type,
+        "image_mime_type": image_mime_type or "",
+        "content_hash": _hash_content(content),
+    }
+    return _hash_text(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
 def _invoke_and_parse(
     llm: BaseChatModel,
     content: str | list,
     schema: type[T],
+    *,
+    cache_key: str | None = None,
 ) -> T:
     """
     普通调用 LLM 并手动提取 JSON 解析为 Pydantic 模型。
@@ -133,14 +167,20 @@ def _invoke_and_parse(
     extracted = _extract_json_from_text(raw_content)
     logger.info("[LLM] 提取 JSON, extracted_len=%d", len(extracted))
     try:
-        return schema.model_validate_json(extracted)
+        parsed = schema.model_validate_json(extracted)
+        if cache_key:
+            set_llm_cache(cache_key, extracted)
+        return parsed
     except Exception as e:
         err_msg = str(e).lower()
         if "invalid escape" in err_msg or "json_invalid" in err_msg:
             repaired = _repair_json_invalid_escapes(extracted)
             logger.info("[LLM] 修复 JSON 非法转义后重试解析")
             try:
-                return schema.model_validate_json(repaired)
+                parsed = schema.model_validate_json(repaired)
+                if cache_key:
+                    set_llm_cache(cache_key, repaired)
+                return parsed
             except Exception:
                 pass
         # 部分模型对 StepCodeOutput 只返回代码块而非 JSON，将提取内容视为 animate_body
@@ -148,6 +188,8 @@ def _invoke_and_parse(
             code = _strip_any_code_block(extracted)
             if code.strip():
                 logger.info("[LLM] StepCodeOutput 解析 JSON 失败，改为将提取内容作为 animate_body 使用")
+                if cache_key:
+                    set_llm_cache(cache_key, json.dumps({"animate_body": code}, ensure_ascii=False))
                 return schema(animate_body=code)
         raise
 
@@ -256,8 +298,13 @@ def invoke_structured(
     models = [model] if model else get_llm_model_list()
 
     def do(m: str) -> T:
+        cache_key = _make_cache_key(model=m, content=prompt, schema=schema, content_type="text")
+        cached = get_llm_cache(cache_key)
+        if cached:
+            logger.info("[LLM] invoke_structured 命中缓存 schema=%s", schema.__name__)
+            return schema.model_validate_json(cached)
         llm = get_chat_model(model=m, timeout=timeout)
-        result = _invoke_and_parse(llm, prompt, schema)
+        result = _invoke_and_parse(llm, prompt, schema, cache_key=cache_key)
         out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
         logger.info("[LLM] invoke_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
         logger.info("[LLM] response: %s", _truncate_for_log(out_str))
@@ -274,11 +321,18 @@ def invoke_plain(prompt: str, *, model: str | None = None) -> str:
     models = [model] if model else get_llm_model_list()
 
     def do(m: str) -> str:
+        cache_key = _make_cache_key(model=m, content=prompt, content_type="text")
+        cached = get_llm_cache(cache_key)
+        if cached:
+            logger.info("[LLM] invoke_plain 命中缓存")
+            return cached
         llm = get_chat_model(model=m)
         msg = llm.invoke([HumanMessage(content=prompt)])
         content = msg.content if hasattr(msg, "content") else str(msg)
         logger.info("[LLM] invoke_plain 响应 response_len=%d", len(content))
         logger.info("[LLM] response: %s", _truncate_for_log(content))
+        if content:
+            set_llm_cache(cache_key, content)
         return content
 
     return _with_model_fallback_and_retry(models, s.llm_retry_per_model, do)
@@ -323,6 +377,7 @@ def invoke_multimodal_plain(
             logger.info("[LLM] invoke_multimodal_plain 请求 content_type=text prompt_len=%d text_len=%d", len(prompt), len(text or ""))
             logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
             logger.info("[LLM] text: %s", _truncate_for_log(text or ""))
+            cache_key = _make_cache_key(model=m, content=content, content_type="text")
         else:
             url = f"data:{image_mime_type};base64,{image_base64}"
             content = [
@@ -331,6 +386,16 @@ def invoke_multimodal_plain(
             ]
             logger.info("[LLM] invoke_multimodal_plain 请求 content_type=image prompt_len=%d image_base64_len=%d", len(prompt), len(image_base64))
             logger.info("[LLM] prompt: %s", _truncate_for_log(prompt))
+            cache_key = _make_cache_key(
+                model=m,
+                content=content,
+                content_type="image",
+                image_mime_type=image_mime_type,
+            )
+        cached = get_llm_cache(cache_key)
+        if cached:
+            logger.info("[LLM] invoke_multimodal_plain 命中缓存 content_type=%s", content_type)
+            return cached
         msg = llm.invoke([HumanMessage(content=content)])
         out = msg.content if hasattr(msg, "content") else str(msg)
         out = (out or "").strip()
@@ -341,6 +406,7 @@ def invoke_multimodal_plain(
                 "视觉/多模态模型返回内容为空（HTTP 200 但无文本）。"
                 "请检查网关或模型配置（如 base_url、model、max_tokens），或查看网关日志。"
             )
+        set_llm_cache(cache_key, out)
         return out
 
     return _with_model_fallback_and_retry(models, retries, do)
@@ -403,9 +469,21 @@ def invoke_multimodal_structured(
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": url}},
             ]
+            cache_key = _make_cache_key(
+                model=m,
+                content=content,
+                schema=schema,
+                content_type="image",
+                image_mime_type=image_mime_type,
+            )
         else:
             content = prompt
-        result = _invoke_and_parse(llm, content, schema)
+            cache_key = _make_cache_key(model=m, content=prompt, schema=schema, content_type="text")
+        cached = get_llm_cache(cache_key)
+        if cached:
+            logger.info("[LLM] invoke_multimodal_structured 命中缓存 schema=%s", schema.__name__)
+            return schema.model_validate_json(cached)
+        result = _invoke_and_parse(llm, content, schema, cache_key=cache_key)
         out_str = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
         logger.info("[LLM] invoke_multimodal_structured 响应 schema=%s response_len=%d", schema.__name__, len(out_str))
         logger.info("[LLM] response: %s", _truncate_for_log(out_str))

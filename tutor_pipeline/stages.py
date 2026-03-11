@@ -243,20 +243,19 @@ async def generate_tts_from_storyboard_async(
             "或 (2) 每幕为「### 第N幕：标题」且含「**读白**：文本」以便回退解析。"
         )
 
-    voice = voice or get_settings().tts_voice
-    durations: list[float] = []
-    entries: list[AudioInfoEntry] = []
-    default_dur = get_settings().default_wait_seconds
+    settings = get_settings()
+    voice = voice or settings.tts_voice
+    default_dur = settings.default_wait_seconds
+    concurrency = max(1, settings.tts_concurrency)
+    logger.info("[tutor_tts] 并发=%d，总条目=%d", concurrency, len(rows))
 
-    for scene_num, file_name, voiceover in rows:
+    async def _render_one(scene_num: int, file_name: str, voiceover: str) -> tuple[int, str, float]:
         if not file_name.lower().endswith(".wav"):
             file_name = file_name.rstrip() + ".wav" if not file_name.endswith(".wav") else file_name
         out_path = output_dir / file_name
         text = (voiceover or "").strip()
         if not text:
-            durations.append(default_dur)
-            entries.append(AudioInfoEntry(scene=scene_num, file=file_name, duration=default_dur))
-            continue
+            return scene_num, file_name, default_dur
         try:
             dur = await generate_audio_with_duration_async(text, out_path, voice=voice)
         except Exception as e:
@@ -264,6 +263,20 @@ async def generate_tts_from_storyboard_async(
             raise RuntimeError(
                 f"TTS 生成失败（幕 {scene_num}，文件 {file_name}）：{e}"
             ) from e
+        return scene_num, file_name, dur
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _bounded(scene_num: int, file_name: str, voiceover: str) -> tuple[int, str, float]:
+        async with semaphore:
+            return await _render_one(scene_num, file_name, voiceover)
+
+    tasks = [asyncio.create_task(_bounded(scene_num, file_name, voiceover)) for scene_num, file_name, voiceover in rows]
+    results = await asyncio.gather(*tasks)
+
+    durations: list[float] = []
+    entries: list[AudioInfoEntry] = []
+    for scene_num, file_name, dur in results:
         durations.append(dur)
         entries.append(AudioInfoEntry(scene=scene_num, file=file_name, duration=dur))
 
@@ -419,7 +432,7 @@ def implement_script(
     math_analysis: str = "",
 ) -> str:
     """步骤7：LLM 根据分镜与 audio_info 生成完整 script.py。走多模型重试与 script 超时。"""
-    from llm_runner import _with_model_fallback_and_retry
+    from llm_runner import _with_model_fallback_and_retry, invoke_plain
     from config import get_llm_model_list, get_settings
 
     prompt = IMPLEMENT_SCRIPT_PROMPT.format(
@@ -432,15 +445,13 @@ def implement_script(
     models = get_llm_model_list()
 
     def do(m: str) -> str:
-        llm = get_chat_model(model=m, timeout=s.llm_script_timeout)
-        msg = llm.invoke([HumanMessage(content=prompt)])
-        raw = msg.content if hasattr(msg, "content") else str(msg)
+        out = invoke_plain(prompt, model=m)
         # 去掉可能的 markdown 代码块
-        if "```python" in raw:
-            raw = re.sub(r"^```python\s*\n?", "", raw)
-        if "```" in raw:
-            raw = re.sub(r"\n?```\s*$", "", raw)
-        out = raw.strip()
+        if "```python" in out:
+            out = re.sub(r"^```python\s*\n?", "", out)
+        if "```" in out:
+            out = re.sub(r"\n?```\s*$", "", out)
+        out = out.strip()
         if not out:
             raise ValueError("脚本生成模型返回内容为空")
         return out

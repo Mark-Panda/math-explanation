@@ -148,17 +148,32 @@ async def generate_audios_for_steps_async(
     """按步骤批量生成音频并返回各步时长列表。同一批内固定使用同一音色，避免出现两种人声。"""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    voice = get_settings().tts_voice
-    logger.info("[TTS] 本批使用音色: %s（共 %d 步）", voice, len(steps))
-    durations: list[float] = []
-    for i, step in enumerate(steps):
-        text = getattr(step, "voiceover_text", None) or (step.get("voiceover_text") if isinstance(step, dict) else "")
+    settings = get_settings()
+    voice = settings.tts_voice
+    concurrency = max(1, settings.tts_concurrency)
+    logger.info("[TTS] 本批使用音色: %s（共 %d 步，并发=%d）", voice, len(steps), concurrency)
+
+    async def _render_one(index: int, step_obj) -> tuple[int, float]:
+        text = getattr(step_obj, "voiceover_text", None) or (
+            step_obj.get("voiceover_text") if isinstance(step_obj, dict) else ""
+        )
         if not text:
-            durations.append(get_settings().default_wait_seconds)
-            continue
-        path = output_dir / f"{prefix}_{i+1}.mp3"
+            return index, settings.default_wait_seconds
+        path = output_dir / f"{prefix}_{index + 1}.mp3"
         dur = await generate_audio_with_duration_async(text, path, voice=voice)
-        durations.append(dur)
+        return index, dur
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _bounded(index: int, step_obj) -> tuple[int, float]:
+        async with semaphore:
+            return await _render_one(index, step_obj)
+
+    tasks = [asyncio.create_task(_bounded(i, step)) for i, step in enumerate(steps)]
+    results = await asyncio.gather(*tasks)
+    durations: list[float] = [settings.default_wait_seconds] * len(steps)
+    for idx, dur in results:
+        durations[idx] = dur
     return durations
 
 
