@@ -123,9 +123,9 @@ uv sync
 5. API 说明：
    - `POST /api/generate_video`：提交题目。**multipart/form-data** 字段：`problem`（题目文本，可选）、`image`（题目图片，可选）。后台走 Tutor 流水线，返回 MP4 的 `result_url`。
    - **前置 Nginx**：接口已改为立即返回 task_id，后台执行识别与生成。若仍 504，可调大 `proxy_read_timeout`（如 `120s`）。**脚本生成阶段** 504 多为转发到 LLM 的网关读超时过短，建议该网关 `proxy_read_timeout` **180s 或 300s**，并设置 `LLM_SCRIPT_TIMEOUT=300`。
-   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时 `result_url` 为可播放/下载的地址（`/results/{task_id}.mp4`）。
+   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时 `result_url` 为可播放/下载的地址（`/results/{task_id}.mp4`）。响应含 `step_durations`（各步骤执行时长，秒），用于界面进度条与历史回显。
    - `POST /api/tasks/{task_id}/retry`：对失败任务断点重试。
-   - `GET /api/history`、`DELETE /api/history/{task_id}`、`POST /api/regenerate`：历史与重新生成。
+   - `GET /api/history`、`DELETE /api/history/{task_id}`、`POST /api/regenerate`：历史与重新生成。历史项含 `problem_preview`（标题）、`step_durations`（步骤耗时）；上传图片时标题为图片文件名，重新生成时沿用原记录标题。
 
 ---
 
