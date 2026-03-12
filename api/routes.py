@@ -84,7 +84,8 @@ def _run_pipeline_task_retry(task_id: str) -> None:
             import shutil
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             shutil.copy(str(result_path), str(dest))
-            set_success(task_id, f"/results/{task_id}.mp4")
+            result_url = f"/results/{task_id}.mp4"
+            set_success(task_id, result_url)
             logger.info("[retry] task_id=%s 视频重试成功 path=%s", task_id, dest)
         else:
             result_path = run_pipeline(
@@ -100,12 +101,13 @@ def _run_pipeline_task_retry(task_id: str) -> None:
             dest = RESULTS_DIR / f"{task_id}.html"
             import shutil
             shutil.copy(str(result_path), str(dest))
-            set_success(task_id, f"/results/{task_id}.html")
+            result_url = f"/results/{task_id}.html"
+            set_success(task_id, result_url)
             logger.info("[retry] task_id=%s 重试成功 path=%s", task_id, dest)
         total_ms = int((time.monotonic() - started_at) * 1000)
         step_json = json.dumps(step_durations, ensure_ascii=False)
         from api.history_store import update_status as history_update_status
-        history_update_status(task_id, "success", total_duration_ms=total_ms, step_durations_json=step_json)
+        history_update_status(task_id, "success", video_path=result_url, total_duration_ms=total_ms, step_durations_json=step_json)
     except Exception as e:
         logger.exception("[retry] task_id=%s 重试失败: %s", task_id, e)
         total_ms = int((time.monotonic() - started_at) * 1000)
@@ -194,7 +196,8 @@ def _run_pipeline_task(
             dest = RESULTS_DIR / f"{task_id}.mp4"
             import shutil
             shutil.copy(str(result_path), str(dest))
-            set_success(task_id, f"/results/{task_id}.mp4")
+            result_url = f"/results/{task_id}.mp4"
+            set_success(task_id, result_url)
             logger.info("[generate] task_id=%s 视频生成成功 path=%s", task_id, dest)
         else:
             result_path = run_pipeline(
@@ -210,12 +213,13 @@ def _run_pipeline_task(
             dest = RESULTS_DIR / f"{task_id}.html"
             import shutil
             shutil.copy(str(result_path), str(dest))
-            set_success(task_id, f"/results/{task_id}.html")
+            result_url = f"/results/{task_id}.html"
+            set_success(task_id, result_url)
             logger.info("[generate] task_id=%s 生成成功 path=%s", task_id, dest)
         total_ms = int((time.monotonic() - started_at) * 1000)
         step_json = json.dumps(step_durations, ensure_ascii=False)
         from api.history_store import update_status as history_update_status
-        history_update_status(task_id, "success", total_duration_ms=total_ms, step_durations_json=step_json)
+        history_update_status(task_id, "success", video_path=result_url, total_duration_ms=total_ms, step_durations_json=step_json)
     except Exception as e:
         logger.exception("[generate] task_id=%s 生成失败: %s", task_id, e)
         total_ms = int((time.monotonic() - started_at) * 1000)

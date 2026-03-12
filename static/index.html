@@ -42,6 +42,10 @@
       resize: vertical;
     }
     textarea::placeholder { color: var(--text-muted); }
+    textarea:focus, .file-label:focus-visible, .btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--accent);
+    }
     .file-upload-wrap {
       margin-top: 0.25rem;
       display: flex;
@@ -72,10 +76,11 @@
       border: none;
       cursor: pointer;
       font-size: 0.9rem;
-      transition: opacity 0.15s;
+      transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
     }
-    .btn:hover:not(:disabled) { opacity: 0.9; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .btn-primary {
       background: var(--accent);
       color: #fff;
@@ -200,12 +205,15 @@
       border-radius: var(--radius);
       border: 1px solid var(--border);
       overflow: hidden;
+      animation: player-in 0.3s ease-out;
     }
-    #player iframe {
-      width: 100%;
-      height: 700px;
-      border: none;
+    @keyframes player-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    #player #result-video {
       border-radius: var(--radius) var(--radius) 0 0;
+      display: block;
     }
     #player .player-actions {
       padding: 0.75rem 1rem;
@@ -215,6 +223,7 @@
     }
     #player a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
     #player a:hover { text-decoration: underline; }
+    #player a:focus-visible { outline: none; text-decoration: underline; }
     .section-title { font-size: 1rem; font-weight: 600; margin: 2rem 0 0.75rem; }
     #history-list { margin-top: 0.5rem; }
     .history-item {
@@ -224,7 +233,9 @@
       padding: 0.75rem 1rem;
       margin-bottom: 0.5rem;
       font-size: 0.9rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
+    .history-item:hover { border-color: var(--text-muted); }
     .history-item .preview {
       color: var(--text);
       margin-bottom: 0.35rem;
@@ -291,29 +302,21 @@
 </head>
 <body>
   <h1>数学讲解动画生成</h1>
-  <p class="muted">输入数学题目或上传题目图片，生成交互式网页动画讲解。可在此查看历史、删除或重新生成。</p>
-
-  <div style="margin-bottom: 1rem;">
-    <label for="output-format">输出格式</label>
-    <select id="output-format" style="margin-top: 0.25rem; padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 0.9rem;">
-      <option value="html">网页动画（HTML，快速预览）</option>
-      <option value="video">Manim 视频（MP4，需安装 Manim）</option>
-    </select>
-  </div>
+  <p class="muted">输入数学题目或上传题目图片，生成 Manim 讲解视频（MP4）。可在此查看历史、删除或重新生成。</p>
 
   <div class="input-mode-wrap">
     <div class="input-mode-tabs" role="tablist">
-      <button type="button" class="tab active" role="tab" id="tab-text" aria-selected="true">文字题目</button>
-      <button type="button" class="tab" role="tab" id="tab-image" aria-selected="false">上传图片</button>
+      <button type="button" class="tab" role="tab" id="tab-text" aria-selected="false">文字题目</button>
+      <button type="button" class="tab active" role="tab" id="tab-image" aria-selected="true">上传图片</button>
     </div>
-    <div id="panel-text" class="input-panel active" role="tabpanel">
+    <div id="panel-text" class="input-panel" role="tabpanel">
       <div class="input-panel-inner">
         <label for="problem">题目内容</label>
         <textarea id="problem" placeholder="例如：求方程 x² = 1 的解"></textarea>
         <button id="submit" class="btn btn-primary">生成动画</button>
       </div>
     </div>
-    <div id="panel-image" class="input-panel" role="tabpanel">
+    <div id="panel-image" class="input-panel active" role="tabpanel">
       <div class="input-panel-inner">
         <label for="image">选择题目图片</label>
         <div class="file-upload-wrap">
@@ -340,12 +343,11 @@
     </div>
   </div>
   <div id="player">
-    <iframe id="result-frame" sandbox="allow-scripts allow-same-origin"></iframe>
-    <video id="result-video" controls style="width: 100%; max-height: 70vh; display: none; background: #000;"></video>
+    <video id="result-video" controls playsinline style="width: 100%; max-height: 70vh; background: #000;"></video>
     <div class="player-actions">
       <a id="open-new-tab" href="" target="_blank">在新标签页打开</a>
       <span class="muted">|</span>
-      <a id="download" href="" download="">下载</a>
+      <a id="download" href="" download="math_explanation.mp4">下载 MP4</a>
     </div>
   </div>
 
@@ -382,21 +384,17 @@
     var progressMetaEl = document.getElementById('progress-meta');
     var progressStepsEl = document.getElementById('progress-steps');
     var playerEl = document.getElementById('player');
-    var resultFrame = document.getElementById('result-frame');
     var resultVideoEl = document.getElementById('result-video');
     var openNewTabEl = document.getElementById('open-new-tab');
     var downloadEl = document.getElementById('download');
-    var outputFormatEl = document.getElementById('output-format');
-    var currentOutputFormat = 'html';
     var historyListEl = document.getElementById('history-list');
     var historyLoadingEl = document.getElementById('history-loading');
     var historyEmptyEl = document.getElementById('history-empty');
 
-    var ALL_STEPS_HTML = ['识别题目图片', '公式交叉验证', '题目分析', '网页动画脚本生成', 'TTS 与时长收集', '时长注入与 HTML 渲染'];
+    var ALL_STEPS_VIDEO = ['数学分析(tutor)', 'HTML 可视化', '分镜脚本', 'TTS 与时长', '验证音频', '脚手架', 'Manim 实现', '检查与渲染'];
     var stepDurations = {};
     var lastCurrentStep = null;
     var currentStepStartAt = null;
-    var ALL_STEPS_VIDEO = ['数学分析(tutor)', 'HTML 可视化', '分镜脚本', 'TTS 与时长', '验证音频', '脚手架', 'Manim 实现', '检查与渲染'];
 
     imageEl.addEventListener('change', function() {
       imageNameEl.textContent = this.files && this.files[0] ? this.files[0].name : '未选择文件';
@@ -432,7 +430,7 @@
 
     function showProgress(currentStep) {
       progressCardEl.classList.remove('result-only');
-      var steps = currentOutputFormat === 'video' ? ALL_STEPS_VIDEO : ALL_STEPS_HTML;
+      var steps = ALL_STEPS_VIDEO;
       var total = steps.length;
       var currentIndex = currentStep ? steps.indexOf(currentStep) : -1;
       var now = Date.now();
@@ -470,26 +468,12 @@
     }
 
     function showResult(url) {
-      var isVideo = /\.mp4$/i.test(url);
-      if (isVideo) {
-        resultFrame.style.display = 'none';
-        resultVideoEl.style.display = 'block';
-        resultVideoEl.src = url;
-        openNewTabEl.href = url;
-        downloadEl.href = url;
-        downloadEl.download = 'math_explanation.mp4';
-        downloadEl.textContent = '下载 MP4';
-      } else {
-        resultVideoEl.style.display = 'none';
-        resultVideoEl.src = '';
-        resultFrame.style.display = 'block';
-        resultFrame.src = url;
-        openNewTabEl.href = url;
-        downloadEl.href = url;
-        downloadEl.download = 'math_animation.html';
-        downloadEl.textContent = '下载 HTML';
-      }
+      resultVideoEl.src = url;
+      openNewTabEl.href = url;
+      downloadEl.href = url;
+      downloadEl.download = 'math_explanation.mp4';
       playerEl.style.display = 'block';
+      playerEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     function formatDate(iso) {
@@ -533,10 +517,9 @@
             html += '<div class="meta"><span class="badge ' + statusClass + '">' + statusText + '</span><span>' + formatDate(item.created_at) + '</span></div>';
             html += '<div class="actions">';
             if (item.status === 'success' && item.result_path) {
-              var isVideo = /\.mp4$/i.test(item.result_path);
-              html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">查看</button>';
+              html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">播放</button>';
               html += '<a class="btn btn-ghost" href="' + item.result_path + '" target="_blank">新窗口打开</a>';
-              html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + (isVideo ? '.mp4' : '.html') + '">下载' + (isVideo ? ' MP4' : ' HTML') + '</a>';
+              html += '<a class="btn btn-ghost" href="' + item.result_path + '" download="math_' + item.task_id + '.mp4">下载 MP4</a>';
             }
             if (item.status === 'failed') {
               html += '<button type="button" class="btn btn-primary btn-retry" data-task-id="' + item.task_id + '">断点重试</button>';
@@ -641,7 +624,7 @@
               showStatus('生成成功', 'success', null, totalLabel ? totalLabel.trim() : null);
               showProgress(data.current_step || lastCurrentStep || null);
               hideProgress();
-              var resultUrl = data.result_url || ('/results/' + taskId + (currentOutputFormat === 'video' ? '.mp4' : '.html'));
+              var resultUrl = data.result_url || ('/results/' + taskId + '.mp4');
               showResult(resultUrl);
               submitBtn.disabled = false; submitImageBtn.disabled = false;
               if (typeof onDone === 'function') onDone();
@@ -667,9 +650,7 @@
     }
 
     function doSubmit(formData) {
-      var format = outputFormatEl.value || 'html';
-      formData.append('output_format', format);
-      currentOutputFormat = format;
+      formData.append('output_format', 'video');
       submitBtn.disabled = true; submitImageBtn.disabled = true;
       playerEl.style.display = 'none';
       var hasImage = formData.has('image');
