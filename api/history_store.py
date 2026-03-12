@@ -151,16 +151,22 @@ def create_record(
         conn.close()
 
 
-def update_problem(task_id: str, problem_text: str) -> None:
-    """更新题目文本（如 OCR 完成后）。"""
+def update_problem(task_id: str, problem_text: str, *, update_preview: bool = True) -> None:
+    """更新题目文本（如 OCR 完成后）。update_preview=False 时仅更新 problem_text，不覆盖 problem_preview（用于保留图片文件名等）。"""
     now = _now_iso()
-    preview = (problem_text or "")[:PREVIEW_MAX]
     conn = _get_conn()
     try:
-        conn.execute(
-            "UPDATE history SET problem_text = ?, problem_preview = ?, updated_at = ? WHERE task_id = ?",
-            (problem_text, preview, now, task_id),
-        )
+        if update_preview:
+            preview = (problem_text or "")[:PREVIEW_MAX]
+            conn.execute(
+                "UPDATE history SET problem_text = ?, problem_preview = ?, updated_at = ? WHERE task_id = ?",
+                (problem_text, preview, now, task_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE history SET problem_text = ?, updated_at = ? WHERE task_id = ?",
+                (problem_text, now, task_id),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -198,6 +204,32 @@ def update_progress(task_id: str, current_step: str, *, started_at: Optional[str
         conn.execute(
             "UPDATE history SET current_step = ?, started_at = COALESCE(?, started_at), updated_at = ? WHERE task_id = ?",
             (current_step, started_at, now, task_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_step_duration(task_id: str, step_index: int, duration_sec: float) -> None:
+    """将单步执行时长合并写入 step_durations_json，便于运行中轮询与历史回显。"""
+    import json
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT step_durations_json FROM history WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        current = {}
+        if row and row[0]:
+            try:
+                current = json.loads(row[0])
+            except (TypeError, ValueError):
+                pass
+        current[str(step_index)] = round(duration_sec, 2)
+        new_json = json.dumps(current, ensure_ascii=False)
+        now = _now_iso()
+        conn.execute(
+            "UPDATE history SET step_durations_json = ?, updated_at = ? WHERE task_id = ?",
+            (new_json, now, task_id),
         )
         conn.commit()
     finally:

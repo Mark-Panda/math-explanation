@@ -243,6 +243,11 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .history-item .step-durations-history {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
     .history-item .meta {
       display: flex;
       align-items: center;
@@ -515,6 +520,11 @@
             var statusText = { pending: '等待中', running: '生成中', success: '成功', failed: '失败' }[item.status] || item.status;
             var html = '<div class="preview" title="' + (item.problem_preview || '').replace(/"/g, '&quot;') + '">' + (item.problem_preview || '—') + '</div>';
             html += '<div class="meta"><span class="badge ' + statusClass + '">' + statusText + '</span><span>' + formatDate(item.created_at) + '</span></div>';
+            if (item.step_durations && Object.keys(item.step_durations).length > 0) {
+              var keys = Object.keys(item.step_durations).map(Number).sort(function(a, b) { return a - b; });
+              var parts = keys.map(function(i) { return '第' + (i + 1) + '步 ' + formatSeconds(item.step_durations[i]); });
+              html += '<div class="step-durations-history">步骤耗时：' + parts.join('，') + '</div>';
+            }
             html += '<div class="actions">';
             if (item.status === 'success' && item.result_path) {
               html += '<button type="button" class="btn btn-ghost btn-play" data-url="' + item.result_path + '">播放</button>';

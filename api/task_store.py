@@ -84,9 +84,9 @@ def set_failed(task_id: str, error: str) -> None:
     history_update_status(task_id, "failed", error=error)
 
 
-def update_task_problem(task_id: str, problem_text: str) -> None:
-    """OCR 或流程中得到题目文本后更新历史记录，便于重新生成。"""
-    history_update_problem(task_id, problem_text)
+def update_task_problem(task_id: str, problem_text: str, *, update_preview: bool = True) -> None:
+    """OCR 或流程中得到题目文本后更新历史记录；update_preview=False 时保留原 problem_preview（如图片文件名）。"""
+    history_update_problem(task_id, problem_text, update_preview=update_preview)
 
 
 def get_task(task_id: str) -> Optional[TaskState]:

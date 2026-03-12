@@ -24,7 +24,12 @@ from api.task_store import (
     set_success,
     update_task_problem,
 )
-from api.history_store import delete_record as history_delete, get_record as history_get, list_history
+from api.history_store import (
+    delete_record as history_delete,
+    get_record as history_get,
+    list_history,
+    update_step_duration as history_update_step_duration,
+)
 from problem_analysis.formula_verifier import verify_and_fix_formulas
 from problem_analysis.image_to_text import extract_problem_text_from_image, image_to_base64
 
@@ -59,6 +64,9 @@ def _run_pipeline_task_retry(task_id: str) -> None:
         step_durations: dict[int, float] = {}
 
         def on_step_start(step_index: int, step_name: str) -> None:
+            if step_index > 0 and (step_index - 1) in step_started_at:
+                prev_duration = time.monotonic() - step_started_at[step_index - 1]
+                history_update_step_duration(task_id, step_index - 1, prev_duration)
             step_started_at[step_index] = time.monotonic()
             set_progress(task_id, step_name)
 
@@ -174,11 +182,14 @@ def _run_pipeline_task(
         if not (problem_text or "").strip():
             set_failed(task_id, "题目为空")
             return
-        # 持久化题目文本，便于历史列表展示与重新生成
-        update_task_problem(task_id, problem_text.strip())
+        # 持久化题目文本；有图片时保留 problem_preview 为图片文件名，不覆盖为 OCR 文本
+        update_task_problem(task_id, problem_text.strip(), update_preview=(image_bytes is None))
         logger.info("[generate] task_id=%s 开始执行流水线 题目前50字=%s", task_id, (problem_text or "")[:50])
 
         def on_step_start(step_index: int, step_name: str) -> None:
+            if step_index > 0 and (step_index - 1) in step_started_at:
+                prev_duration = time.monotonic() - step_started_at[step_index - 1]
+                history_update_step_duration(task_id, step_index - 1, prev_duration)
             step_started_at[step_index] = time.monotonic()
             set_progress(task_id, step_name)
 
@@ -263,7 +274,10 @@ async def generate_video(
     if not problem_text and not image_bytes:
         raise HTTPException(status_code=400, detail="请提供题目文本或上传题目图片")
 
-    problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
+    if image and image.filename:
+        problem_preview = (problem_text or "").strip()[:120] if problem_text else (image.filename or "图片上传")
+    else:
+        problem_preview = (problem_text or "").strip()[:120] if problem_text else "图片上传"
     task_id = create_task(
         problem_preview=problem_preview,
         problem_text=problem_text,
@@ -281,12 +295,9 @@ async def get_task_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     record = history_get(task_id)
-    step_durations = None
-    if record and record.step_durations_json:
-        try:
-            step_durations = json.loads(record.step_durations_json)
-        except (TypeError, ValueError):
-            step_durations = None
+    step_durations = _parse_step_durations(
+        getattr(record, "step_durations_json", None) if record else None
+    )
     return TaskStatusResponse(
         task_id=task.task_id,
         status=task.status,
@@ -317,6 +328,17 @@ async def retry_task(background_tasks: BackgroundTasks, task_id: str):
     return GenerateVideoResponse(task_id=task_id, status="running")
 
 
+def _parse_step_durations(step_durations_json: str | None) -> dict[int, float] | None:
+    """将 step_durations_json 解析为 int key 的 dict，供 API 返回。"""
+    if not step_durations_json:
+        return None
+    try:
+        raw = json.loads(step_durations_json)
+        return {int(k): float(v) for k, v in raw.items()}
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/history", response_model=list[HistoryItem])
 async def get_history(limit: int = 50, offset: int = 0):
     """分页获取历史记录，按创建时间倒序。"""
@@ -329,6 +351,7 @@ async def get_history(limit: int = 50, offset: int = 0):
             result_path=r.video_path,
             error=r.error,
             created_at=r.created_at,
+            step_durations=_parse_step_durations(getattr(r, "step_durations_json", None)),
         )
         for r in records
     ]

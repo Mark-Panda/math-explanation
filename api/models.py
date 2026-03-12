@@ -28,6 +28,7 @@ class HistoryItem(BaseModel):
     result_path: str | None = None
     error: str | None = None
     created_at: str = ""
+    step_durations: dict[int, float] | None = Field(None, description="各步骤执行时长（秒），key 为步骤索引")
 
 
 class RegenerateRequest(BaseModel):
