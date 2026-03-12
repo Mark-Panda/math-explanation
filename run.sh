@@ -13,7 +13,7 @@ fi
 # 若无虚拟环境或依赖缺失则同步
 uv sync
 
-HOST="${HOST:-0.0.0.0}"
+HOST="${HOST:-localhost}"
 PORT="${PORT:-8000}"
 echo "启动服务: http://${HOST}:${PORT}"
 echo "按 Ctrl+C 停止"

@@ -1,11 +1,12 @@
 # 数学讲解流水线
 
-从数学题目自动生成带旁白的讲解内容，支持两种输出模式：
+从数学题目自动生成带旁白的讲解视频（Manim MP4）。
 
-- **网页动画（默认）**：题目分析 → 网页动画脚本生成（HTML + 旁白）→ TTS 与时长收集 → 时长注入与 HTML 渲染（含自愈），得到单页可播放的 HTML。
-- **Manim 视频（Tutor 流水线）**：按 [Tutor 技能](.cursor/skills/tutor/SKILL.md) 逻辑：数学分析(tutor) → HTML 可视化 → 分镜脚本 → TTS → 验证 → 脚手架 → Manim 实现 → 检查与渲染，得到 MP4 视频。
+> **说明文档**：想了解「项目做什么、为什么这样设计、这样设计的好处」可看 [docs/项目说明文档.md](docs/项目说明文档.md)（通俗版）。
 
-提供 Web 界面与 API：输入题目或上传题目图片、选择输出格式、触发生成、轮询状态、页面内播放或下载。
+**流水线**：按 [Tutor 技能](.cursor/skills/tutor/SKILL.md) 逻辑：数学分析(tutor) → HTML 可视化 → 分镜脚本 → TTS → 验证 → 脚手架 → Manim 实现 → 检查与渲染，得到 MP4 视频。
+
+提供 Web 界面与 API：输入题目或上传题目图片、触发生成、轮询状态、页面内播放或下载。
 
 ---
 
@@ -50,16 +51,14 @@ uv sync
 | `VISION_TEMPERATURE`    | 视觉模型温度             | 用 LLM   |
 | `VISION_REQUEST_TIMEOUT`| 视觉模型超时（秒）       | 用 LLM   |
 
-**其他（HTML 流水线 / 通用）：**
+**其他（通用）：**
 
 | 变量                         | 说明                               | 默认                   |
 | ---------------------------- | ---------------------------------- | ---------------------- |
 | `TTS_VOICE`                  | Edge-TTS 音色                      | `zh-CN-XiaoxiaoNeural` |
-| `HTML_SELF_HEAL_MAX_ATTEMPTS`| HTML 动画代码自愈最大重试次数      | `3`                    |
-| `DEFAULT_WAIT_SECONDS`       | 时长不足时默认 step 时长（秒）    | `2.0`                  |
-| `ANIMATION_STYLE`            | 可选。动画风格描述，注入脚本生成 prompt；为空则不追加 | 空                     |
+| `DEFAULT_WAIT_SECONDS`       | 时长不足时默认 step 时长（秒）     | `2.0`                  |
 
-**Tutor 视频流水线（仅当 `output_format=video` 时）：**
+**Manim 视频流水线：**
 
 | 变量                         | 说明                               | 默认        |
 | ---------------------------- | ---------------------------------- | ----------- |
@@ -79,11 +78,7 @@ uv sync
 | **图片识别**（仅上传图片时） | 从题目图片中识别文字、公式与图形描述 | `VISION_PROMPT` | `problem_analysis/image_to_text.py`：第 6 行常量，在 `extract_problem_text_from_image()` 中作为多模态请求的文本部分 |
 | **公式交叉验证**（仅上传图片时） | 对比原图与识别文本，修正 LaTeX/数字/图形描述错误 | `FORMULA_VERIFY_PROMPT` | `problem_analysis/formula_verifier.py`：第 8 行常量，在 `verify_and_fix_formulas()` 中 `format(extracted_text=...)` 后与原图一起发给多模态 LLM |
 | **题目分析** | 分析题目并生成解题步骤（steps：step_id、description、math_formula、visual_focus、voiceover_text） | `PROBLEM_ANALYSIS_PROMPT`（仅文本）/ `PROBLEM_ANALYSIS_PROMPT_WITH_IMAGE`（文本+原图） | `problem_analysis/analyzer.py`：第 7、13 行常量，在 `analyze_problem()` 中按是否带图选择其一 |
-| **脚本生成 - 阶段 A** | 基于 steps 设计每步的网页动画方案（shared_css、shared_svg、step_plans 含 animation_description、image_prompt） | `PLAN_PROMPT`（仅文本）/ `PLAN_PROMPT_WITH_IMAGE`（文本+原图） | `script_generation/generator.py`：第 21、41 行常量，在 `_generate_plan()` 中按是否带图选择其一 |
-| **脚本生成 - 阶段 B** | 为每一步生成 `animate(container)` 的 JavaScript 函数体 | `STEP_CODE_PROMPT` | `script_generation/generator.py`：第 62 行常量，在 `_generate_step_code()` 中 `format(shared_css_summary=..., step_id=..., description=..., ...)` 后调用结构化 LLM |
-| **HTML 自愈** | 校验/渲染失败时，根据错误信息修复 HTML 动画代码 | 内联 prompt（错误信息 + 代码片段） | `asset_generation/html_render.py`：`fix_html_with_llm()` 内，约第 310 行 |
-
-**Tutor 视频流水线（`output_format=video`）中的 LLM 阶段：**
+**Manim 视频流水线中的 LLM 阶段：**
 
 | 阶段 | 用途 | 说明 | 位置 |
 |------|------|------|------|
@@ -97,9 +92,6 @@ uv sync
 - **VISION_PROMPT**：要求按「题目文字」「图形描述」「公式列表」三部分输出，公式用 LaTeX，图形描述包含类型、标注、边长角度等。
 - **FORMULA_VERIFY_PROMPT**：要求对比原图与识别文本，检查公式正确性、完整性、数字符号、图形描述等，修正后输出完整文本，不添加解释。
 - **PROBLEM_ANALYSIS_PROMPT / WITH_IMAGE**：数学专家+动画脚本设计师角色，输出 steps 列表（step_id、description、math_formula、visual_focus、voiceover_text）；带图版强调以图片为准的几何与公式细节。
-- **PLAN_PROMPT / PLAN_PROMPT_WITH_IMAGE**：数学动画设计师角色，输出 shared_css、shared_svg、step_plans（step_id、animation_description、image_prompt）；约束 800×600、Unicode 公式、纯 CSS 动画、SVG 几何。若配置了 **动画风格**（`ANIMATION_STYLE` 或接口参数 `animation_style`），会在此处及阶段 B 追加「动画风格要求」。
-- **STEP_CODE_PROMPT**：前端动画工程师角色，给定当前步骤描述、公式、视觉重点、旁白、动画方案，输出 `animate_body`（仅函数体），通过 `container` 操作 DOM，仅用 CSS 动画与已有 SVG，不用外部库。同样会注入动画风格要求（若有）。
-- **HTML 自愈**：给定错误信息与问题代码，要求只返回完整可运行 HTML 片段，保留 `animation-container`、`stepAnimations`、`STEP_PLACEHOLDER`，不用外部库。
 - **Tutor 数学分析**：数学专家角色，输出「已知条件 / 推导事实 / 图形构建方法 / 需要证明的结论」；禁止用坐标系求解，用几何推理。
 - **Tutor 分镜**：视频分镜设计师角色，输出分镜设计（画面、字幕、读白、动画、退场）与音频生成清单表（幕号、文件名、读白文本、时长留空）。
 - **Tutor Manim 实现**：Manim 动画工程师角色，补全 `calculate_geometry`、`assert_geometry`、每幕 `add_sound` 与动画，全部用 `Text` 不用 `MathTex`。
@@ -124,28 +116,23 @@ uv sync
 
 3. 打开浏览器访问 **Web 界面**：  
    **http://localhost:8000/**  
-   输入题目或上传题目图片，选择输出格式（网页动画 / Manim 视频），点击「生成视频」，等待完成后在页内播放或下载。
+   输入题目或上传题目图片，点击「生成视频」，等待完成后在页内播放或下载。
 
-4. **输出格式**：
-   - `html`（默认）：生成单页 HTML 动画，适合快速预览、无需安装 Manim。
-   - `video`：按 Tutor 技能 8 步生成 Manim MP4，需安装 Manim（见下方「Tutor 视频流水线」）。
+4. **输出**：按 Tutor 技能 8 步生成 Manim MP4，需安装 Manim（见下方「Manim 视频流水线」）。
 
 5. API 说明：
-   - `POST /api/generate_video`：提交题目。**multipart/form-data** 字段：`problem`（题目文本，可选）、`image`（题目图片，可选）、`animation_style`（可选）、`output_format`（可选，`html` | `video`，默认 `html`）。`output_format=video` 时走 Tutor 流水线，返回 MP4 的 `result_url`。
+   - `POST /api/generate_video`：提交题目。**multipart/form-data** 字段：`problem`（题目文本，可选）、`image`（题目图片，可选）。后台走 Tutor 流水线，返回 MP4 的 `result_url`。
    - **前置 Nginx**：接口已改为立即返回 task_id，后台执行识别与生成。若仍 504，可调大 `proxy_read_timeout`（如 `120s`）。**脚本生成阶段** 504 多为转发到 LLM 的网关读超时过短，建议该网关 `proxy_read_timeout` **180s 或 300s**，并设置 `LLM_SCRIPT_TIMEOUT=300`。
-   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时 `result_url` 为可播放/下载的地址（`/results/{task_id}.html` 或 `/results/{task_id}.mp4`）。
-   - `POST /api/tasks/{task_id}/retry`：对失败任务断点重试（当前仅支持 HTML 流水线）。
+   - `GET /api/tasks/{task_id}`：查询任务状态与结果；成功时 `result_url` 为可播放/下载的地址（`/results/{task_id}.mp4`）。
+   - `POST /api/tasks/{task_id}/retry`：对失败任务断点重试。
    - `GET /api/history`、`DELETE /api/history/{task_id}`、`POST /api/regenerate`：历史与重新生成。
 
 ---
 
-## 可配置项（自愈、时长与动画风格）
+## 可配置项（自愈、时长）
 
-- **HTML 自愈重试次数**：`HTML_SELF_HEAL_MAX_ATTEMPTS`，默认 3。HTML 动画校验或渲染失败时由 LLM 修复后重试，超过此次数则任务失败。
 - **默认 step 时长**：`DEFAULT_WAIT_SECONDS`，默认 2.0 秒。当 TTS 返回的时长数量少于步骤数时，不足的步骤使用该默认时长。
-- **动画风格**：`ANIMATION_STYLE` 或接口参数 `animation_style`。非空时会以「**动画风格要求**：xxx」的形式追加到脚本生成两阶段的 prompt 中，让大模型按该风格生成（如「教科书风格、极简、白底；动画以淡入和滑入为主，避免花哨效果」）。为空则不追加，沿用 prompt 内默认约束。
-
-- **Tutor 视频流水线**（`output_format=video`）：
+- **Manim 视频流水线**：
   - 需安装 Manim：`pip install manim` 或取消注释 `requirements.txt` 中的 `manim`；系统需 FFmpeg（TTS 已用）。
   - 环境变量见上表（`MANIM_COMMAND`、`MANIM_SCENE_CLASS`、`MANIM_QUALITY`、`MANIM_SELF_HEAL_MAX_ATTEMPTS`）。
   - 流水线 8 步：数学分析(tutor) → HTML 可视化 → 分镜脚本 → TTS 与时长 → 验证音频 → 脚手架 → Manim 实现 → 检查与渲染；支持断点检查点，失败后可重试从断点继续。
@@ -154,11 +141,10 @@ uv sync
 
 ## 项目结构
 
-- `problem_analysis/`：题目理解与 steps schema；图片识别、公式验证、题目分析（含各 prompt 常量）
-- `script_generation/`：两阶段脚本生成（动画方案 + 每步 JS 代码），产出 HTML 片段与 image_prompts
-- `asset_generation/`：TTS、时长注入、HTML 动画校验与渲染（含自愈）、SD 占位
- `api/`：流水线编排（HTML / Tutor 视频）、任务存储、FastAPI 路由
-- `tutor_pipeline/`：/tutor 技能服务端实现（数学分析、HTML 可视化、分镜、TTS、脚手架、Manim 实现、渲染）
+- `problem_analysis/`：题目理解；图片识别、公式验证、题目分析（含各 prompt 常量）
+- `asset_generation/`：TTS、Manim 渲染（含自愈）等
+- `api/`：流水线编排（Manim 视频）、任务存储、FastAPI 路由
+- `tutor_pipeline/`：Tutor 技能服务端实现（数学分析、HTML 可视化、分镜、TTS、脚手架、Manim 实现、渲染）
 - `config.py`：pydantic-settings 配置
 - `llm_runner.py`：LangChain 可复用 LLM 调用（结构化/纯文本/多模态）
 - `main.py`：FastAPI 应用入口
