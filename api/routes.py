@@ -386,7 +386,8 @@ async def regenerate(background_tasks: BackgroundTasks, body: RegenerateRequest)
             status_code=400,
             detail="该记录无题目文本（如仅图片上传且未保存），无法重新生成",
         )
-    problem_preview = (problem_text or "")[:120]
+    # 保留原记录的标题（如图片文件名），避免重新生成后变成题目前 120 字
+    problem_preview = (rec.problem_preview or "").strip() or (problem_text or "")[:120]
     output_format = getattr(rec, "output_format", "html") or "html"
     new_task_id = create_task(
         problem_preview=problem_preview,
